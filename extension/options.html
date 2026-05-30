@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Voxinator — Settings</title>
+  <style>
+    body { font: 14px system-ui, sans-serif; margin: 20px; max-width: 480px; }
+    h1 { font-size: 18px; }
+    label { display: block; margin: 14px 0 4px; font-weight: 600; }
+    input[type=text], input[type=number], select, textarea { width: 100%; padding: 6px; box-sizing: border-box; }
+    textarea { height: 90px; font-family: monospace; }
+    .row { display: flex; gap: 12px; }
+    .row > div { flex: 1; }
+    .hint { color: #666; font-weight: 400; font-size: 12px; }
+    #status { margin-top: 8px; padding: 6px 10px; border-radius: 6px; background: #eee; display: inline-block; }
+    button { margin-top: 16px; padding: 8px 16px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>Voxinator</h1>
+  <div id="status">Connection: checking…</div>
+
+  <div class="row">
+    <div>
+      <label>Engine port</label>
+      <input type="number" id="port" min="1" max="65535" />
+    </div>
+    <div>
+      <label>Token</label>
+      <input type="text" id="token" />
+    </div>
+  </div>
+
+  <label>Default action when dialog is detected</label>
+  <select id="defaultAction">
+    <option value="duck">Reduce volume / duck — smooth fade (good for music)</option>
+    <option value="pause">Pause — instant hard cut (good for audiobooks)</option>
+  </select>
+
+  <label>Duck volume <span class="hint">(target level when ducking, %)</span></label>
+  <input type="range" id="duckVolume" min="0" max="100" step="5" />
+  <span id="duckVolumeLabel"></span>
+
+  <label>Ramp duration <span class="hint">(fade time for ducking, ms; 0 = instant)</span></label>
+  <input type="number" id="rampMs" min="0" max="5000" step="50" />
+
+  <label>Per-site rules <span class="hint">(one <code>host = pause|duck</code> per line; the most
+    specific host wins, so <code>music.youtube.com = duck</code> overrides <code>youtube.com = pause</code>)</span></label>
+  <textarea id="perSite"></textarea>
+
+  <br />
+  <button id="save">Save</button>
+  <span id="saved" style="color: green; margin-left: 10px;"></span>
+
+  <script src="options.js"></script>
+</body>
+</html>

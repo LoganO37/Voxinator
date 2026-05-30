@@ -1,0 +1,17 @@
+# .NET build outputs
+engine/bin/
+engine/obj/
+engine/publish/
+
+# Test audio scratch (synthetic clips + local game-audio captures)
+engine/testaudio/
+
+# Claude Code / local tooling config
+.claude/
+
+# OS / editor cruft
+.vs/
+*.user
+Thumbs.db
+desktop.ini
+.DS_Store
