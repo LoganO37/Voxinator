@@ -50,7 +50,11 @@ Right-click the tray icon (left-click also opens the menu):
 - **Status** — Disabled / No sources / Listening / **DUCKING**.
 - **Sources (games / apps) ▶** — check **one or more** processes to monitor (e.g. your game
   *and* Discord). Media ducks when **any** checked source has speech. Items are checkable;
-  click to toggle. "Clear all sources" removes them.
+  click to toggle. "Clear all sources" removes them. Auto-detected games show a `•auto` tag.
+- **Auto-detect games** — when on (default), any **known game from `engine/games.json`** (~130
+  popular titles, matched by executable name) is monitored automatically while it's running and
+  dropped when it closes. Extend the list by adding `{ "process": "exe-name-without-.exe",
+  "title": "..." }` entries to `games.json` (next to the exe).
 - **Enabled** — master on/off.
 - **Settings…** — port, token, detection threshold, attack (min-speech ms), **end buffer** ms.
 - **Quit**.

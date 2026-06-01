@@ -8,6 +8,7 @@ public sealed class GameSource
 {
     public string ProcessName { get; set; }
     public uint? Pid { get; set; }
+    [JsonIgnore] public bool Auto { get; set; } // engine-detected source; transient, not persisted
 }
 
 /// <summary>
@@ -22,6 +23,7 @@ public sealed class EngineSettings
     public int MinSpeechMs { get; set; } = 1;
     public int EndBufferMs { get; set; } = 2000;
     public bool Enabled { get; set; } = true;
+    public bool AutoDetectGames { get; set; } = true;
 
     /// <summary>Processes monitored for speech. Speech in ANY of them ducks media
     /// (e.g. a game's dialog AND a Discord call).</summary>

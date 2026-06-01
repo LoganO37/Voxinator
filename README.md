@@ -5,7 +5,9 @@
 Voxinator listens to a game's audio, detects when **speech/dialog** is playing, and ducks
 (lowers) or pauses your *other* media in the browser so you never miss a line — then restores
 it when the dialog ends. It can monitor more than one source at once (e.g. a game **and** a
-Discord call), so your music dips whenever anyone is talking.
+Discord call), so your music dips whenever anyone is talking. It also **auto-detects popular
+games** — when a known game (from a bundled, editable list of ~130) starts, it's monitored
+automatically; you can still pick anything manually.
 
 > Status: working on **Windows 10/11**, with a **Chrome/Chromium + Firefox** extension.
 > See [PLAN.md](PLAN.md) for the design and roadmap, and [TESTING.md](TESTING.md) to run it.
@@ -34,6 +36,7 @@ capture), so the media it's ducking never confuses the speech detector.
 engine/        C# / .NET 9 console + system-tray app (the detector & WebSocket server)
   Voxinator.csproj
   models/silero_vad.onnx     Silero VAD v5 model (MIT)
+  games.json                 popular-games library for auto-detection (editable)
 extension/     MV3 browser extension (Chrome/Chromium + Firefox), plain JS
 PLAN.md        Design & build plan / roadmap
 TESTING.md     How to build, run, and test every piece

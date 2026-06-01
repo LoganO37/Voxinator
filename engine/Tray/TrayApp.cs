@@ -17,6 +17,7 @@ public sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _statusItem;
     private readonly ToolStripMenuItem _sourcesItem;
     private readonly ToolStripMenuItem _enabledItem;
+    private readonly ToolStripMenuItem _autoDetectItem;
 
     public TrayApp(string modelPath)
     {
@@ -31,6 +32,8 @@ public sealed class TrayApp : ApplicationContext
         _sourcesItem = new ToolStripMenuItem("Sources (games / apps)");
         _enabledItem = new ToolStripMenuItem("Enabled") { CheckOnClick = true, Checked = settings.Enabled };
         _enabledItem.Click += (_, __) => { _engine.SetEnabled(_enabledItem.Checked); Persist(); };
+        _autoDetectItem = new ToolStripMenuItem("Auto-detect games") { CheckOnClick = true, Checked = settings.AutoDetectGames };
+        _autoDetectItem.Click += (_, __) => { _engine.SetAutoDetect(_autoDetectItem.Checked); Persist(); };
 
         var settingsItem = new ToolStripMenuItem("Settings…");
         settingsItem.Click += (_, __) => OpenSettings();
@@ -41,6 +44,7 @@ public sealed class TrayApp : ApplicationContext
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_sourcesItem);
+        menu.Items.Add(_autoDetectItem);
         menu.Items.Add(_enabledItem);
         menu.Items.Add(settingsItem);
         menu.Items.Add(new ToolStripSeparator());
@@ -96,6 +100,7 @@ public sealed class TrayApp : ApplicationContext
     private void AddSourceMenuItem(string name, uint pid, string label)
     {
         bool selected = _engine.HasSource(name);
+        if (!selected && _engine.IsAutoSource(name)) label += "  •auto";
         var item = new ToolStripMenuItem(label) { Checked = selected };
         item.Click += (_, __) =>
         {
@@ -121,6 +126,7 @@ public sealed class TrayApp : ApplicationContext
         var status = _engine.StatusSummary();
         _statusItem.Text = $"Status: {status}";
         _enabledItem.Checked = _engine.Settings.Enabled;
+        _autoDetectItem.Checked = _engine.Settings.AutoDetectGames;
         var text = $"Voxinator — {status}";
         _icon.Text = text.Length > 63 ? text.Substring(0, 63) : text; // NotifyIcon.Text caps at 63 chars
     }

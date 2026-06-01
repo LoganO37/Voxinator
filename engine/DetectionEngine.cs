@@ -45,6 +45,8 @@ public sealed class DetectionEngine : IDisposable
     private int _wsPort;
     private string _wsToken;
     private EngineSettings _settings;
+    private readonly GameLibrary _library;
+    private readonly List<GameSource> _autoSources = new(); // engine-detected games (transient)
 
     public bool Ducking { get; private set; }
     public event Action<bool> DuckChanged;
@@ -55,6 +57,7 @@ public sealed class DetectionEngine : IDisposable
     {
         _modelPath = modelPath;
         _settings = settings;
+        _library = GameLibrary.Load(Path.Combine(AppContext.BaseDirectory, "games.json"));
         StartWs(settings.Port, settings.Token);
         _watchdog = new System.Threading.Timer(_ => Watchdog(), null, 5000, 5000);
     }
@@ -64,7 +67,7 @@ public sealed class DetectionEngine : IDisposable
     /// <summary>Resolve source PIDs by name and start capturing. Call once after construction.</summary>
     public void Start()
     {
-        lock (_lock) RestartCaptureLocked();
+        lock (_lock) { RefreshAutoSourcesLocked(); RestartCaptureLocked(); }
     }
 
     /// <summary>For UI: (name, capturing, speaking) per source.</summary>
@@ -90,11 +93,12 @@ public sealed class DetectionEngine : IDisposable
         lock (_lock)
         {
             if (!_settings.Enabled) return "Disabled";
-            if (_settings.Sources.Count == 0) return "No sources selected";
+            var eff = EffectiveSourcesLocked().ToList();
+            if (eff.Count == 0) return _settings.AutoDetectGames ? "Watching for games…" : "No sources selected";
             int capturing = _monitors.Count(m => m.Capturing);
-            string names = string.Join(", ", _settings.Sources.Select(s => s.ProcessName));
+            string names = string.Join(", ", eff.Select(s => s.ProcessName));
             if (Ducking) return $"DUCKING — {names}";
-            return $"Listening ({capturing}/{_settings.Sources.Count}) — {names}";
+            return $"Listening ({capturing}/{eff.Count}) — {names}";
         }
     }
 
@@ -136,9 +140,18 @@ public sealed class DetectionEngine : IDisposable
 
     public void SetEnabled(bool enabled) { lock (_lock) { _settings.Enabled = enabled; RestartCaptureLocked(); } }
 
+    public void SetAutoDetect(bool on) { lock (_lock) { _settings.AutoDetectGames = on; RefreshAutoSourcesLocked(); RestartCaptureLocked(); } }
+
+    public int GameLibrarySize => _library.Count;
+
     public bool HasSource(string name)
     {
         lock (_lock) return _settings.Sources.Any(x => NameEq(x.ProcessName, name));
+    }
+
+    public bool IsAutoSource(string name)
+    {
+        lock (_lock) return _autoSources.Any(a => NameEq(a.ProcessName, name));
     }
 
     private void StartWs(int port, string token)
@@ -148,6 +161,41 @@ public sealed class DetectionEngine : IDisposable
         _wsPort = port;
         _wsToken = token;
         Log?.Invoke($"WebSocket listening on ws://127.0.0.1:{port}/");
+    }
+
+    // Manual sources (from settings) plus auto-detected running games, de-duped by name
+    // (a manual entry wins over an auto one for the same process).
+    private IEnumerable<GameSource> EffectiveSourcesLocked()
+    {
+        foreach (var m in _settings.Sources) yield return m;
+        foreach (var a in _autoSources)
+            if (!_settings.Sources.Any(m => NameEq(m.ProcessName, a.ProcessName))) yield return a;
+    }
+
+    // Auto-detect: add running known games (from games.json) as sources; drop ones that closed
+    // or that the user has since added manually. Called each watchdog tick.
+    private void RefreshAutoSourcesLocked()
+    {
+        if (!_settings.Enabled || !_settings.AutoDetectGames)
+        {
+            if (_autoSources.Count > 0) _autoSources.Clear();
+            return;
+        }
+        var detected = _library.FindRunningGames();
+        _autoSources.RemoveAll(a =>
+            !detected.Any(d => NameEq(d.name, a.ProcessName)) ||
+            _settings.Sources.Any(m => NameEq(m.ProcessName, a.ProcessName)));
+        foreach (var d in detected)
+        {
+            if (_settings.Sources.Any(m => NameEq(m.ProcessName, d.name))) continue;
+            var existing = _autoSources.FirstOrDefault(a => NameEq(a.ProcessName, d.name));
+            if (existing != null) existing.Pid = d.pid;
+            else
+            {
+                _autoSources.Add(new GameSource { ProcessName = d.name, Pid = d.pid, Auto = true });
+                Log?.Invoke($"auto-detected game: {d.title} ({d.name}, pid {d.pid})");
+            }
+        }
     }
 
     // Make running monitors match the enabled sources. Incremental: preserves healthy
@@ -169,7 +217,8 @@ public sealed class DetectionEngine : IDisposable
             return;
         }
 
-        var wanted = _settings.Sources.Where(s => s.Pid is uint).Select(s => (uint)s.Pid).ToHashSet();
+        var sources = EffectiveSourcesLocked().ToList();
+        var wanted = sources.Where(s => s.Pid is uint).Select(s => (uint)s.Pid).ToHashSet();
 
         // Drop monitors whose source was removed or whose process died.
         for (int i = _monitors.Count - 1; i >= 0; i--)
@@ -180,7 +229,7 @@ public sealed class DetectionEngine : IDisposable
 
         // Start a monitor for any wanted source not already capturing. On failure, don't keep
         // a dead monitor — the next watchdog tick retries.
-        foreach (var src in _settings.Sources)
+        foreach (var src in sources)
         {
             if (src.Pid is not uint pid) continue;
             if (_monitors.Any(m => m.Pid == pid)) continue;
@@ -243,7 +292,7 @@ public sealed class DetectionEngine : IDisposable
     {
         lock (_lock)
         {
-            if (_settings.Sources.Count == 0) return;
+            RefreshAutoSourcesLocked();
             RestartCaptureLocked();
         }
     }

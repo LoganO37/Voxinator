@@ -39,7 +39,8 @@ This single decision removes the hardest ambiguity in the project.
 | **Browsers** | Chrome + Firefox (WebExtensions / MV3) | Edge (Chromium, ~free) |
 
 **Explicitly out of v1 scope** (deferred, but architected for):
-- Automatic game detection / popular-game library.
+- ~~Automatic game detection / popular-game library.~~ ✅ **Implemented** — bundled,
+  editable `engine/games.json` (~130 popular games); the engine auto-adds any that are running.
 - Control of non-browser desktop media apps.
 - Cross-platform support.
 
@@ -186,7 +187,10 @@ feels responsive without jitter. The duration/hold logic keeps it smooth.
   and user-friendly.
 - **Phase 4 — Polish.** Installer, auto-start, WS reconnect robustness, multi-output-device
   handling, logging/diagnostics, sensitivity slider.
-- **Phase 5+ (post-v1).** Automatic game detection (popular-game library), desktop-app media
+- **Phase 5+ (post-v1).** ✅ **Automatic game detection** built — a bundled popular-game
+  library (`engine/games.json`, ~130 titles keyed by executable name); the engine scans
+  running processes each watchdog tick and auto-monitors matches (and drops them when closed),
+  alongside manual sources, toggled by "Auto-detect games". Remaining: desktop-app media
   control (per-session volume + SMTC), per-game profiles, macOS/Linux.
 
 ---
