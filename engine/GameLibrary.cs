@@ -15,6 +15,9 @@ public sealed class GameLibrary
     private readonly Dictionary<string, string> _byName = new(StringComparer.OrdinalIgnoreCase);
     public int Count => _byName.Count;
 
+    public IReadOnlyList<Entry> All() =>
+        _byName.Select(kv => new Entry(kv.Key, kv.Value)).OrderBy(e => e.Title, StringComparer.OrdinalIgnoreCase).ToList();
+
     public static GameLibrary Load(string path)
     {
         var lib = new GameLibrary();

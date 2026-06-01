@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Voxinator</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">🔊</div>
+        <div class="brand-name">Voxinator</div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="dashboard"><span class="nav-ico">🎛️</span> Dashboard</button>
+        <button class="nav-item" data-view="games"><span class="nav-ico">🎮</span> Games</button>
+        <button class="nav-item" data-view="websites"><span class="nav-ico">🌐</span> Websites</button>
+        <button class="nav-item" data-view="settings"><span class="nav-ico">⚙️</span> Settings</button>
+        <button class="nav-item" data-view="extension"><span class="nav-ico">🧩</span> Get Extension</button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="state-dot" id="footDot"></div>
+        <div class="state-text" id="footState">—</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- DASHBOARD -->
+      <section class="view active" id="view-dashboard">
+        <header class="view-head">
+          <h1>Dashboard</h1>
+          <p class="sub">Voxinator lowers your music and pauses videos when your game or call has dialog.</p>
+        </header>
+
+        <div class="status-banner" id="statusBanner">
+          <div class="status-dot" id="statusDot"></div>
+          <div>
+            <div class="status-title" id="statusTitle">Idle</div>
+            <div class="status-sub" id="statusSub">Waiting…</div>
+          </div>
+          <div class="ext-chip" id="extChip">Extension: —</div>
+        </div>
+
+        <div class="card toggle-row">
+          <div>
+            <div class="row-title">Monitoring enabled</div>
+            <div class="row-sub">Master switch for all ducking.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="tglEnabled" /><span class="slider"></span></label>
+        </div>
+
+        <div class="card toggle-row">
+          <div>
+            <div class="row-title">Auto-detect games</div>
+            <div class="row-sub">Automatically monitor known games (256 in the library) while they're running.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="tglAuto" /><span class="slider"></span></label>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Monitored now</div>
+          <div id="sourcesList" class="sources"><div class="empty">Nothing monitored yet.</div></div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="view" id="view-settings">
+        <header class="view-head">
+          <h1>Settings</h1>
+          <p class="sub">Detection tuning and the local connection the browser extension uses.</p>
+        </header>
+
+        <div class="card">
+          <div class="card-title">Detection</div>
+          <div class="field">
+            <label>Sensitivity (threshold) <span class="val" id="vThreshold"></span></label>
+            <input type="range" id="setThreshold" min="0" max="1" step="0.01" />
+            <div class="hint">Lower = more sensitive (ducks more easily). ~0.5 is balanced; 0.35 is eager.</div>
+          </div>
+          <div class="field">
+            <label>Attack — speech needed before ducking <span class="val" id="vAttack"></span></label>
+            <input type="range" id="setAttack" min="0" max="2000" step="10" />
+            <div class="hint">How long speech must persist before ducking. Higher = fewer false triggers.</div>
+          </div>
+          <div class="field">
+            <label>End buffer — hold after dialog stops <span class="val" id="vEnd"></span></label>
+            <input type="range" id="setEnd" min="0" max="5000" step="50" />
+            <div class="hint">Keeps media ducked through natural pauses between lines.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Connection</div>
+          <div class="grid2">
+            <div class="field"><label>WebSocket port</label><input type="number" id="setPort" min="1" max="65535" /></div>
+            <div class="field"><label>Token</label><input type="text" id="setToken" /></div>
+          </div>
+          <div class="hint">The browser extension connects to <code>ws://127.0.0.1:&lt;port&gt;</code> using this token.</div>
+        </div>
+
+        <div class="actions">
+          <button class="btn primary" id="btnSaveSettings">Save settings</button>
+          <span class="saved" id="savedMsg">Saved</span>
+        </div>
+      </section>
+
+      <!-- PLACEHOLDERS (next slices) -->
+      <section class="view" id="view-games">
+        <header class="view-head">
+          <h1>Games</h1>
+          <p class="sub">Voxinator auto-detects known games while they run — and you can add any app yourself.</p>
+        </header>
+
+        <div class="card toggle-row">
+          <div>
+            <div class="row-title">Auto-detect games</div>
+            <div class="row-sub">Automatically monitor games from the built-in library while they're running.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="gAuto" /><span class="slider"></span></label>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Monitored sources</div>
+          <div id="gMonitored" class="sources"><div class="empty">Nothing monitored yet.</div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Add a source</div>
+          <div class="addrow">
+            <input type="text" id="gAddName" placeholder="Executable name, e.g. eldenring (no .exe)" />
+            <button class="btn primary" id="gAddBtn">Add</button>
+          </div>
+          <div class="sub-label">Currently playing apps — click to monitor</div>
+          <div id="gApps" class="chips"><div class="empty">No apps playing audio right now.</div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Game library <span class="count" id="gLibCount"></span></div>
+          <input type="text" id="gSearch" class="search" placeholder="Search the library…" />
+          <div id="gLibList" class="liblist"></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-websites">
+        <header class="view-head"><h1>Websites</h1></header>
+        <div class="card soon">
+          <div class="soon-ico">🌐</div>
+          <div class="card-title">Coming in the next update</div>
+          <p>Per-site rules with one-tap <b>Pause</b> / <b>Duck</b> buttons, duck level, and fade speed —
+             moving here from the extension so every setting lives in one place.</p>
+        </div>
+      </section>
+
+      <section class="view" id="view-extension">
+        <header class="view-head"><h1>Get the extension</h1></header>
+        <div class="card soon">
+          <div class="soon-ico">🧩</div>
+          <div class="card-title">Coming in the next update</div>
+          <p>Install the Chrome and/or Firefox add-on with step-by-step instructions and an FAQ.
+             This page will appear automatically on first launch.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

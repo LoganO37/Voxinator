@@ -14,6 +14,7 @@ public sealed class TrayApp : ApplicationContext
     private readonly DetectionEngine _engine;
     private readonly NotifyIcon _icon;
     private readonly Form _anchor;
+    private MainWindow _window;
     private readonly ToolStripMenuItem _statusItem;
     private readonly ToolStripMenuItem _sourcesItem;
     private readonly ToolStripMenuItem _enabledItem;
@@ -35,18 +36,18 @@ public sealed class TrayApp : ApplicationContext
         _autoDetectItem = new ToolStripMenuItem("Auto-detect games") { CheckOnClick = true, Checked = settings.AutoDetectGames };
         _autoDetectItem.Click += (_, __) => { _engine.SetAutoDetect(_autoDetectItem.Checked); Persist(); };
 
-        var settingsItem = new ToolStripMenuItem("Settings…");
-        settingsItem.Click += (_, __) => OpenSettings();
+        var openItem = new ToolStripMenuItem("Open Voxinator");
+        openItem.Click += (_, __) => _window?.ShowWindow();
         var quitItem = new ToolStripMenuItem("Quit");
         quitItem.Click += (_, __) => Quit();
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add(_statusItem);
+        menu.Items.Add(openItem);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(_statusItem);
         menu.Items.Add(_sourcesItem);
         menu.Items.Add(_autoDetectItem);
         menu.Items.Add(_enabledItem);
-        menu.Items.Add(settingsItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(quitItem);
         menu.Opening += (_, __) => PopulateSourcesMenu();
@@ -58,11 +59,15 @@ public sealed class TrayApp : ApplicationContext
             Text = "Voxinator",
             ContextMenuStrip = menu,
         };
-        _icon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) menu.Show(Cursor.Position); };
+        _icon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) _window?.ShowWindow(); };
 
         _engine.Start(); // resolve saved sources by name and begin capturing
+
+        _window = new MainWindow(_engine);
+        _window.ShowWindow();
+
         UpdateUi();
-        TrayLogger.Log("tray started");
+        TrayLogger.Log("app started");
     }
 
     private void OnUi(Action a)
@@ -138,6 +143,7 @@ public sealed class TrayApp : ApplicationContext
 
     private void Quit()
     {
+        _window?.QuitApp();
         _icon.Visible = false;
         _icon.Dispose();
         _engine.Dispose();

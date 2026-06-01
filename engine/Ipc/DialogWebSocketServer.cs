@@ -22,6 +22,7 @@ public sealed class DialogWebSocketServer : IDisposable
     private readonly HttpListener _listener = new();
     private readonly string _token;
     private readonly ConcurrentDictionary<Guid, Client> _clients = new();
+    public int ClientCount => _clients.Count;
     private readonly CancellationTokenSource _cts = new();
     private System.Threading.Timer _pingTimer;
 

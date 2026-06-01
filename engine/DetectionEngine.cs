@@ -49,6 +49,7 @@ public sealed class DetectionEngine : IDisposable
     private readonly List<GameSource> _autoSources = new(); // engine-detected games (transient)
 
     public bool Ducking { get; private set; }
+    public int ExtensionClients => _ws?.ClientCount ?? 0; // browser extensions connected to the WS
     public event Action<bool> DuckChanged;
     public event Action StateChanged;
     public Action<string> Log { get; set; }
@@ -143,6 +144,21 @@ public sealed class DetectionEngine : IDisposable
     public void SetAutoDetect(bool on) { lock (_lock) { _settings.AutoDetectGames = on; RefreshAutoSourcesLocked(); RestartCaptureLocked(); } }
 
     public int GameLibrarySize => _library.Count;
+
+    public IReadOnlyList<(string process, string title)> LibraryGames()
+        => _library.All().Select(e => (e.Process, e.Title)).ToList();
+
+    public void AddSourceByName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return;
+        lock (_lock)
+        {
+            name = name.Trim();
+            if (!_settings.Sources.Any(x => NameEq(x.ProcessName, name)))
+                _settings.Sources.Add(new GameSource { ProcessName = name, Pid = null });
+            RestartCaptureLocked();
+        }
+    }
 
     public bool HasSource(string name)
     {
