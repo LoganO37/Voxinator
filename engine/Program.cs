@@ -104,7 +104,7 @@ internal static class Program
     {
         string inPath = Opt(args, "--in", null);
         if (inPath == null) { Console.Error.WriteLine("--in <file.wav> is required."); return 1; }
-        float threshold = (float)DblOpt(args, "--threshold", 0.5);
+        float threshold = (float)DblOpt(args, "--threshold", 0.35);
         string model = ModelPath(args);
 
         using var vad = new SileroVad(model);
@@ -139,7 +139,7 @@ internal static class Program
     {
         string dir = Opt(args, "--dir", null);
         if (dir == null || !Directory.Exists(dir)) { Console.Error.WriteLine("--dir <folder of labeled wavs> is required."); return 1; }
-        float threshold = (float)DblOpt(args, "--threshold", 0.5);
+        float threshold = (float)DblOpt(args, "--threshold", 0.35);
         var dp = DebounceParamsFrom(args);
         string model = ModelPath(args);
 
@@ -191,7 +191,7 @@ internal static class Program
     {
         string inPath = Opt(args, "--in", null);
         if (inPath == null) { Console.Error.WriteLine("--in <file.wav> is required."); return 1; }
-        float threshold = (float)DblOpt(args, "--threshold", 0.5);
+        float threshold = (float)DblOpt(args, "--threshold", 0.35);
         var dp = DebounceParamsFrom(args);
         string model = ModelPath(args);
 
@@ -221,7 +221,7 @@ internal static class Program
         uint pid = (uint)IntOpt(args, "--pid", -1);
         if (pid == unchecked((uint)-1)) { Console.Error.WriteLine("--pid is required (see `voxinator list`)."); return 1; }
         bool exclude = Flag(args, "--exclude");
-        float threshold = (float)DblOpt(args, "--threshold", 0.5);
+        float threshold = (float)DblOpt(args, "--threshold", 0.35);
         var dp = DebounceParamsFrom(args);
         string model = ModelPath(args);
         var mode = exclude ? ProcessLoopbackMode.ExcludeTargetProcessTree : ProcessLoopbackMode.IncludeTargetProcessTree;
@@ -353,7 +353,7 @@ internal static class Program
     private static DebounceParams DebounceParamsFrom(string[] args) => new()
     {
         ChunkMs = SileroVad.ChunkSeconds * 1000,
-        MinSpeechMs = IntOpt(args, "--min-speech-ms", 250),
+        MinSpeechMs = IntOpt(args, "--min-speech-ms", 1),
         EndBufferMs = IntOpt(args, "--end-buffer-ms", IntOpt(args, "--hang-ms", 2000)),
     };
 

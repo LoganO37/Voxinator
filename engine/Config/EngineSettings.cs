@@ -18,8 +18,8 @@ public sealed class EngineSettings
 {
     public int Port { get; set; } = 8730;
     public string Token { get; set; } = "changeme";
-    public float Threshold { get; set; } = 0.5f;
-    public int MinSpeechMs { get; set; } = 250;
+    public float Threshold { get; set; } = 0.35f;
+    public int MinSpeechMs { get; set; } = 1;
     public int EndBufferMs { get; set; } = 2000;
     public bool Enabled { get; set; } = true;
 

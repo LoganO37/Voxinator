@@ -4,10 +4,10 @@ const api = (typeof browser !== "undefined") ? browser : chrome;
 const DEFAULTS = {
   port: 8730,
   token: "changeme",
-  defaultAction: "duck",
+  defaultAction: "pause",
   duckVolume: 0.2,
   rampMs: 300,
-  perSite: "youtube.com = pause\nyoutu.be = pause\nmusic.youtube.com = duck",
+  perSite: "youtube.com = pause\nyoutu.be = pause\naudible.com = pause\nopen.spotify.com = duck\nmusic.youtube.com = duck\nmusic.apple.com = duck\nmusic.amazon.com = duck\nsoundcloud.com = duck\ntidal.com = duck\npandora.com = duck\ndeezer.com = duck\nbandcamp.com = duck",
 };
 
 const $ = (id) => document.getElementById(id);

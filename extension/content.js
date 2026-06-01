@@ -9,10 +9,10 @@
 const api = (typeof browser !== "undefined") ? browser : chrome;
 
 const SETTINGS_DEFAULTS = {
-  defaultAction: "duck",
+  defaultAction: "pause",
   duckVolume: 0.2,
   rampMs: 300,
-  perSite: "youtube.com = pause\nyoutu.be = pause\nmusic.youtube.com = duck",
+  perSite: "youtube.com = pause\nyoutu.be = pause\naudible.com = pause\nopen.spotify.com = duck\nmusic.youtube.com = duck\nmusic.apple.com = duck\nmusic.amazon.com = duck\nsoundcloud.com = duck\ntidal.com = duck\npandora.com = duck\ndeezer.com = duck\nbandcamp.com = duck",
 };
 
 let settings = SETTINGS_DEFAULTS;
@@ -39,7 +39,7 @@ function actionForHost() {
     const matches = host === h || host.endsWith("." + h); // exact host or a subdomain of it
     if (matches && h.length > bestLen) { best = a; bestLen = h.length; }
   }
-  return best || settings.defaultAction || "duck";
+  return best || settings.defaultAction || "pause";
 }
 
 const media = () => Array.from(document.querySelectorAll("video, audio"));
@@ -161,17 +161,68 @@ const observer = new MutationObserver((muts) => {
 });
 observer.observe(document.documentElement || document, { childList: true, subtree: true });
 
+// Spotify web has NO <audio>/<video> element (Web Audio + EME), so we control it through its
+// own UI. The "duck" action drives Spotify's volume <input type=range> (read/ramp/restore);
+// the "pause" action clicks the transport play/pause button. The per-site rule picks which.
+let spotifyPausedByUs = false;
+let spotifyPrevVol = null; // saved volume fraction (0..1) while ducked
+
+function spotifyVolInput() {
+  const vb = document.querySelector('[data-testid="volume-bar"]');
+  return vb ? (vb.querySelector('input[type="range"]') || vb.querySelector("input")) : null;
+}
+function spotifyGetVol(input) {
+  const min = parseFloat(input.min) || 0, max = (parseFloat(input.max) || 100); // unset max => range default 100
+  return clamp01((parseFloat(input.value) - min) / ((max - min) || 1));
+}
+// Set a React-controlled range input so Spotify reacts: native value setter + 'input' event
+// (live volume). 'change' is fired separately, once, to persist — see commit() below.
+function spotifySetVol(input, frac) {
+  const min = parseFloat(input.min) || 0, max = (parseFloat(input.max) || 100); // unset max => range default 100
+  const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  desc.set.call(input, String(min + (max - min) * clamp01(frac)));
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function spotifyDuck(on) {
+  if (location.hostname !== "open.spotify.com") return;
+
+  if (actionForHost() === "pause") {
+    const btn = document.querySelector('[data-testid="control-button-playpause"]');
+    if (!btn) return;
+    const label = (btn.getAttribute("aria-label") || "").trim().toLowerCase();
+    if (on) { if (label === "pause") { btn.click(); spotifyPausedByUs = true; } } // pause if playing
+    else { if (spotifyPausedByUs && label === "play") btn.click(); spotifyPausedByUs = false; }
+    return;
+  }
+
+  // "duck": reduce Spotify's own volume slider, then restore it.
+  const input = spotifyVolInput();
+  if (!input) { console.log("[gdd] spotify: no volume input found"); return; }
+  const ctrl = { get: () => spotifyGetVol(input), set: (f) => spotifySetVol(input, f) };
+  const commit = () => input.dispatchEvent(new Event("change", { bubbles: true })); // persist at ramp end
+  const ramp = Number(settings.rampMs ?? 300);
+  if (on) {
+    if (spotifyPrevVol === null) spotifyPrevVol = spotifyGetVol(input);
+    rampVolume(input, ctrl, clamp01(settings.duckVolume ?? 0.2), ramp, commit);
+  } else if (spotifyPrevVol !== null) {
+    rampVolume(input, ctrl, spotifyPrevVol, ramp, commit);
+    spotifyPrevVol = null;
+  }
+}
+
 api.runtime.onMessage.addListener((msg) => {
   if (msg && msg.cmd === "duck") {
     ducking = !!msg.on;
     trackAll();
     if (ducking) applyAll(); else releaseAll();
     bridge(ducking);
+    spotifyDuck(ducking);
   }
 });
 
 // On init, sync with current engine state (covers tabs opened mid-dialog).
 trackAll();
 Promise.resolve(api.runtime.sendMessage({ cmd: "getState" }))
-  .then((r) => { if (r && r.ducking) { ducking = true; trackAll(); applyAll(); bridge(true); } })
+  .then((r) => { if (r && r.ducking) { ducking = true; trackAll(); applyAll(); bridge(true); spotifyDuck(true); } })
   .catch(() => {});
