@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Voxinator",
-  "version": "0.3.2",
+  "version": "0.3.4",
   "description": "Pauses or ducks browser media when the native engine detects game/app dialog.",
   "permissions": ["storage", "tabs", "alarms"],
   "host_permissions": ["<all_urls>"],

@@ -49,20 +49,15 @@ public sealed class EngineSettings
     /// <summary>Per-site overrides. The most specific (longest) matching host wins in the extension.</summary>
     public List<SiteRule> Sites { get; set; } = DefaultSites();
 
+    // Only sites we've actually verified ship as defaults. Users can add others (Spotify,
+    // Bandcamp, etc.) themselves in the Websites tab — the extension supports more than this.
     private static List<SiteRule> DefaultSites() => new()
     {
         new() { Host = "youtube.com",       Action = "pause" },
-        new() { Host = "youtu.be",          Action = "pause" },
-        new() { Host = "audible.com",       Action = "pause" },
-        new() { Host = "open.spotify.com",  Action = "duck" },
         new() { Host = "music.youtube.com", Action = "duck" },
-        new() { Host = "music.apple.com",   Action = "duck" },
         new() { Host = "music.amazon.com",  Action = "duck" },
         new() { Host = "soundcloud.com",    Action = "duck" },
-        new() { Host = "tidal.com",         Action = "duck" },
-        new() { Host = "pandora.com",       Action = "duck" },
-        new() { Host = "deezer.com",        Action = "duck" },
-        new() { Host = "bandcamp.com",      Action = "duck" },
+        new() { Host = "audible.com",       Action = "pause" },
     };
 
     // Legacy single-source fields (pre multi-source); migrated to Sources on load.

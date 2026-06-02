@@ -45,8 +45,10 @@ function mock(cmd) {
     defaultAction: "pause", duckVolume: 0.2, rampMs: 300, extensionClients: 1,
     sites: [
       { host: "youtube.com", action: "pause" },
-      { host: "open.spotify.com", action: "duck" },
       { host: "music.youtube.com", action: "duck" },
+      { host: "music.amazon.com", action: "duck" },
+      { host: "soundcloud.com", action: "duck" },
+      { host: "audible.com", action: "pause" },
     ],
   };
   if (cmd === "extensionInfo") return { bundledVersion: "0.3.0", folderPath: "C:\\Users\\you\\AppData\\Roaming\\Voxinator\\extension", repoUrl: "https://github.com/LoganO37/Voxinator" };
@@ -246,7 +248,7 @@ const FAQ = [
   ["I'm not sure which folder to pick",
     "Choose the folder that directly contains manifest.json. The \"Get extension & open folder\" button opens exactly the right one — point your browser at that."],
   ["A site won't duck or pause",
-    "Open the Websites tab — that site may be set to the other action, or have no rule (so it uses the default). Spotify and YouTube Music duck by default; YouTube and Audible pause."],
+    "Open the Websites tab — that site may be set to the other action, or have no rule (so it uses the default). YouTube Music, Amazon Music, and SoundCloud duck by default; YouTube and Audible pause."],
   ["Still nothing happens",
     "Confirm the Dashboard shows \"Listening\" with your game monitored, and the extension icon shows \"connected\". After updating the extension files, reload it in your browser."],
 ];

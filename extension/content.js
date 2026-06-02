@@ -14,7 +14,7 @@ const SETTINGS_DEFAULTS = {
   defaultAction: "pause",
   duckVolume: 0.2,
   rampMs: 300,
-  perSite: "youtube.com = pause\nyoutu.be = pause\naudible.com = pause\nopen.spotify.com = duck\nmusic.youtube.com = duck\nmusic.apple.com = duck\nmusic.amazon.com = duck\nsoundcloud.com = duck\ntidal.com = duck\npandora.com = duck\ndeezer.com = duck\nbandcamp.com = duck",
+  perSite: "youtube.com = pause\nmusic.youtube.com = duck\nmusic.amazon.com = duck\nsoundcloud.com = duck\naudible.com = pause",
 };
 
 let settings = SETTINGS_DEFAULTS;
@@ -288,6 +288,98 @@ function amazonControl(on) {
   else amazonDuck(on);
 }
 
+// Bandcamp (bandcamp.com): unpurchased streams have NO UI volume control, and audio is wired
+// through Web Audio (a gain node), so the element's `.volume` is ignored — ducking can't work,
+// so Bandcamp is pause-only. Bandcamp does expose a real <audio> element on most pages, in which
+// case the generic pause path (el.pause()/el.play()) already handles it. This bespoke handler is
+// a FALLBACK for pages where no media element is reachable (pure Web Audio): it clicks Bandcamp's
+// own play/pause transport button. The media()-length guard keeps the two paths from fighting.
+let bandcampPausedByUs = false;
+function bandcampPlayBtn() {
+  return document.querySelector(".inline_player .playbutton")
+      || document.querySelector("#player .playbutton")
+      || document.querySelector(".playbutton")
+      || document.querySelector('[aria-label="Play"], [aria-label="Pause"]');
+}
+function bandcampPlaying(btn) {
+  // Classic Bandcamp toggles a `playing` class on .playbutton; newer controls flip the aria-label.
+  return btn.classList.contains("playing") || /pause/i.test(btn.getAttribute("aria-label") || "");
+}
+function bandcampControl(on) {
+  if (!/(^|\.)bandcamp\.com$/.test(location.hostname)) return;
+  if (media().length > 0) return; // a real <audio>/<video> exists — generic pause path owns it
+  const btn = bandcampPlayBtn();
+  if (!btn) { console.log("[gdd] bandcamp: no media element and no play/pause button found"); return; }
+  if (on) {
+    if (bandcampPlaying(btn)) { btn.click(); bandcampPausedByUs = true; }
+  } else if (bandcampPausedByUs) {
+    if (!bandcampPlaying(btn)) btn.click();
+    bandcampPausedByUs = false;
+  }
+}
+
+// SoundCloud (soundcloud.com), like Spotify, is pure Web Audio — there's NO media element at all,
+// and its volume is a custom VERTICAL div-slider tucked behind the speaker icon (not a native
+// <input> like Amazon's). We drive it with synthetic mouse events: "duck" reveals the slider,
+// reads/saves the current level, then clicks the track at the duck target (instant both directions
+// — a smooth fade would need the flyout held open the whole time); "pause" clicks the transport
+// button. Verified: dispatching mousedown/up on .volume__sliderBackground at a computed clientY
+// moves SoundCloud's real output volume (progress fill height / track height == the level).
+let soundcloudPrevVol = null;   // saved fraction (0..1) while ducked
+let soundcloudPausedByUs = false;
+
+function soundcloudReveal(vol) {
+  // The slider is collapsed via a class + hover state; nudge both so it lays out and stays open.
+  vol.classList.remove("volume__hideVolume");
+  ["mouseover", "mouseenter"].forEach((t) => vol.dispatchEvent(new MouseEvent(t, { bubbles: true })));
+}
+function soundcloudCollapse(vol) {
+  ["mouseleave", "mouseout"].forEach((t) => vol.dispatchEvent(new MouseEvent(t, { bubbles: true })));
+}
+function soundcloudSetFrac(bg, frac) {
+  const r = bg.getBoundingClientRect();
+  const x = r.left + r.width / 2, y = r.bottom - r.height * clamp01(frac); // vertical: bottom=0, top=1
+  const mk = (t) => new MouseEvent(t, { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window });
+  bg.dispatchEvent(mk("mousedown"));
+  bg.dispatchEvent(mk("mousemove"));
+  bg.dispatchEvent(mk("mouseup"));
+  document.dispatchEvent(mk("mouseup"));
+}
+function soundcloudDuck(on) {
+  const vol = document.querySelector(".volume");
+  if (!vol) return;
+  soundcloudReveal(vol);
+  // The flyout renders a tick after hover, so measure/click after a short delay (imperceptible).
+  setTimeout(() => {
+    const bg = vol.querySelector(".volume__sliderBackground") || vol.querySelector(".volume__sliderWrapper");
+    const prog = vol.querySelector(".volume__sliderProgress");
+    const r = bg && bg.getBoundingClientRect();
+    if (r && r.height) {
+      if (on) {
+        if (soundcloudPrevVol === null)
+          soundcloudPrevVol = prog ? clamp01(prog.getBoundingClientRect().height / r.height) : 1;
+        soundcloudSetFrac(bg, clamp01(settings.duckVolume ?? 0.2)); // instant cut
+      } else if (soundcloudPrevVol !== null) {
+        soundcloudSetFrac(bg, soundcloudPrevVol);                   // instant restore
+        soundcloudPrevVol = null;
+      }
+    }
+    soundcloudCollapse(vol);
+  }, 80);
+}
+function soundcloudPause(on) {
+  const btn = document.querySelector(".playControls__play, .playControl");
+  if (!btn) return;
+  const playing = btn.classList.contains("playing"); // SoundCloud flags the active state with .playing
+  if (on) { if (playing) { btn.click(); soundcloudPausedByUs = true; } }
+  else if (soundcloudPausedByUs) { if (!playing) btn.click(); soundcloudPausedByUs = false; }
+}
+function soundcloudControl(on) {
+  if (location.hostname !== "soundcloud.com") return;
+  if (actionForHost() === "pause") soundcloudPause(on);
+  else soundcloudDuck(on);
+}
+
 api.runtime.onMessage.addListener((msg) => {
   if (msg && msg.cmd === "duck") {
     ducking = !!msg.on;
@@ -296,11 +388,13 @@ api.runtime.onMessage.addListener((msg) => {
     bridge(ducking);
     spotifyDuck(ducking);
     amazonControl(ducking);
+    bandcampControl(ducking);
+    soundcloudControl(ducking);
   }
 });
 
 // On init, sync with current engine state (covers tabs opened mid-dialog).
 trackAll();
 Promise.resolve(api.runtime.sendMessage({ cmd: "getState" }))
-  .then((r) => { if (r && r.ducking) { ducking = true; trackAll(); applyAll(); bridge(true); spotifyDuck(true); amazonControl(true); } })
+  .then((r) => { if (r && r.ducking) { ducking = true; trackAll(); applyAll(); bridge(true); spotifyDuck(true); amazonControl(true); bandcampControl(true); soundcloudControl(true); } })
   .catch(() => {});
