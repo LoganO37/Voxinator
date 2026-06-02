@@ -43,7 +43,8 @@ public sealed class EngineSettings
     public string DefaultAction { get; set; } = "pause";
     /// <summary>Target volume (0..1) when ducking.</summary>
     public float DuckVolume { get; set; } = 0.2f;
-    /// <summary>Fade duration in ms for ducking (0 = instant).</summary>
+    /// <summary>Fade-back-in duration in ms when restoring after a duck. The duck-down is always
+    /// instant; this only controls how gradually volume returns once dialog ends (0 = instant).</summary>
     public int RampMs { get; set; } = 300;
     /// <summary>Per-site overrides. The most specific (longest) matching host wins in the extension.</summary>
     public List<SiteRule> Sites { get; set; } = DefaultSites();

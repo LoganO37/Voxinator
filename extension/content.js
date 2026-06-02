@@ -1,7 +1,9 @@
 // Cross-browser content script (Chrome/Chromium + Firefox). Pauses or ducks media while
 // game/app dialog is active.
 //   - "pause" -> instant hard cut (good for audiobooks / spoken-word).
-//   - "duck"  -> smooth volume fade over rampMs (good for music); rampMs=0 is a hard cut.
+//   - "duck"  -> volume drops INSTANTLY when dialog starts, then fades back in over rampMs
+//               when dialog ends (good for music). The cut is always instant; rampMs only
+//               controls the fade-back-in.
 //
 // Robust to real sites: remembers the current duck state and re-applies it to media added or
 // started mid-dialog (YouTube SPA navigation, autoplay-next), and syncs state on init so a
@@ -61,7 +63,7 @@ function bridge(on) {
     const payload = JSON.stringify({
       cmd: on ? "duck" : "unduck",
       target: clamp01(settings.duckVolume ?? 0.2),
-      ramp: Number(settings.rampMs ?? 300),
+      ramp: on ? 0 : Number(settings.rampMs ?? 300), // instant cut down, fade back in on restore
       t: Date.now(), // changes every time so the observer always fires
     });
     document.documentElement.setAttribute("data-gdd-bridge", payload);
@@ -97,7 +99,7 @@ function applyToEl(el) {
     el.__gdd_prevVol = ctrl.get();
     el.__gdd_duckedByUs = true;
     el.__gdd_duckTarget = target;
-    rampVolume(el, ctrl, target, Number(settings.rampMs ?? 300));
+    rampVolume(el, ctrl, target, 0); // instant cut; the fade happens on restore (releaseEl)
   }
 }
 
@@ -204,11 +206,86 @@ function spotifyDuck(on) {
   const ramp = Number(settings.rampMs ?? 300);
   if (on) {
     if (spotifyPrevVol === null) spotifyPrevVol = spotifyGetVol(input);
-    rampVolume(input, ctrl, clamp01(settings.duckVolume ?? 0.2), ramp, commit);
+    rampVolume(input, ctrl, clamp01(settings.duckVolume ?? 0.2), 0, commit); // instant cut
   } else if (spotifyPrevVol !== null) {
-    rampVolume(input, ctrl, spotifyPrevVol, ramp, commit);
+    rampVolume(input, ctrl, spotifyPrevVol, ramp, commit); // fade back in
     spotifyPrevVol = null;
   }
+}
+
+// Amazon Music web (music.amazon.com), like Spotify, plays through Web Audio — its only media
+// element is an empty <video> whose .volume is ignored. We drive its own UI instead: "duck"
+// ramps the Volume-flyout slider, "pause" clicks the transport button. Controls live in shadow
+// DOM, so pierce open shadow roots (deepFind).
+function deepFind(test, root = document) {
+  let nodes;
+  try { nodes = root.querySelectorAll("*"); } catch { return null; }
+  for (const el of nodes) {
+    try { if (test(el)) return el; } catch {}
+    if (el.shadowRoot) { const r = deepFind(test, el.shadowRoot); if (r) return r; }
+  }
+  return null;
+}
+function amazonBtn(labelRe) {
+  return deepFind((e) => e.tagName === "BUTTON" && labelRe.test(e.getAttribute("aria-label") || ""));
+}
+// Amazon's real volume control is an <input aria-label="Volume Level"> on a 0..1 scale, but it
+// only mounts when the "Volume" flyout is open — so deploy it on demand, then ramp it like
+// Spotify (React-controlled: native value setter + 'input', with a 'change' to persist).
+function amazonVolInput() {
+  return deepFind((e) => e.tagName === "INPUT" && /volume/i.test(e.getAttribute("aria-label") || ""));
+}
+function amazonWithSlider(cb) {
+  const found = amazonVolInput();
+  if (found) { cb(found); return; } // already mounted from a previous open / user interaction
+  const volBtn = amazonBtn(/^volume$/i);
+  if (!volBtn) { cb(null); return; }
+  volBtn.click(); // open the flyout so the slider mounts
+  setTimeout(() => cb(amazonVolInput()), 350);
+}
+function amazonGetFrac(input) {
+  const min = parseFloat(input.min) || 0, max = (parseFloat(input.max) || 1);
+  return clamp01((parseFloat(input.value) - min) / ((max - min) || 1));
+}
+function amazonSetFrac(input, frac) {
+  const min = parseFloat(input.min) || 0, max = (parseFloat(input.max) || 1);
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set
+    .call(input, String(min + (max - min) * clamp01(frac)));
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+let amazonPrevVol = null;   // saved fraction (0..1) while ducked
+let amazonPausedByUs = false;
+
+function amazonDuck(on) {
+  amazonWithSlider((input) => {
+    if (!input) return;
+    const ctrl = { get: () => amazonGetFrac(input), set: (f) => amazonSetFrac(input, f) };
+    const commit = () => input.dispatchEvent(new Event("change", { bubbles: true })); // persist at ramp end
+    const ramp = Number(settings.rampMs ?? 300);
+    if (on) {
+      if (amazonPrevVol === null) amazonPrevVol = ctrl.get();
+      rampVolume(input, ctrl, clamp01(settings.duckVolume ?? 0.2), 0, commit); // instant cut
+    } else if (amazonPrevVol !== null) {
+      rampVolume(input, ctrl, amazonPrevVol, ramp, commit); // fade back in
+      amazonPrevVol = null;
+    }
+  });
+}
+function amazonPause(on) {
+  if (on) {
+    const b = amazonBtn(/^pause$/i); // present only while actually playing
+    if (b) { b.click(); amazonPausedByUs = true; }
+  } else if (amazonPausedByUs) {
+    const b = amazonBtn(/^play$/i); // present only while paused
+    if (b) b.click();
+    amazonPausedByUs = false;
+  }
+}
+function amazonControl(on) {
+  if (location.hostname !== "music.amazon.com") return;
+  if (actionForHost() === "pause") amazonPause(on);
+  else amazonDuck(on);
 }
 
 api.runtime.onMessage.addListener((msg) => {
@@ -218,11 +295,12 @@ api.runtime.onMessage.addListener((msg) => {
     if (ducking) applyAll(); else releaseAll();
     bridge(ducking);
     spotifyDuck(ducking);
+    amazonControl(ducking);
   }
 });
 
 // On init, sync with current engine state (covers tabs opened mid-dialog).
 trackAll();
 Promise.resolve(api.runtime.sendMessage({ cmd: "getState" }))
-  .then((r) => { if (r && r.ducking) { ducking = true; trackAll(); applyAll(); bridge(true); spotifyDuck(true); } })
+  .then((r) => { if (r && r.ducking) { ducking = true; trackAll(); applyAll(); bridge(true); spotifyDuck(true); amazonControl(true); } })
   .catch(() => {});
