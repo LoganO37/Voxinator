@@ -51,7 +51,7 @@ function mock(cmd) {
       { host: "audible.com", action: "pause" },
     ],
   };
-  if (cmd === "extensionInfo") return { bundledVersion: "0.3.0", folderPath: "C:\\Users\\you\\AppData\\Roaming\\Voxinator\\extension", repoUrl: "https://github.com/LoganO37/Voxinator" };
+  if (cmd === "extensionInfo") return { bundledVersion: "0.3.0", folderPath: "C:\\Users\\you\\Downloads\\Voxinator-extension", repoUrl: "https://github.com/LoganO37/Voxinator" };
   return {};
 }
 
