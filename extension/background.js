@@ -28,6 +28,7 @@ async function connect() {
     try { msg = JSON.parse(ev.data); } catch { return; }
     if (msg.type === "DIALOG_START") setDucking(true);
     else if (msg.type === "DIALOG_END") setDucking(false);
+    else if (msg.type === "CONFIG") applyConfig(msg);
   };
   ws.onclose = () => { ws = null; scheduleReconnect(); };
   ws.onerror = () => { try { ws.close(); } catch {} };
@@ -36,6 +37,21 @@ async function connect() {
 function scheduleReconnect() {
   if (reconnectTimer) return;
   reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 2000);
+}
+
+// The Voxinator app is the source of truth for browser behavior. It pushes a CONFIG message
+// (on connect and whenever the user changes a setting); we mirror it into storage.local using
+// the keys the content script already reads (defaultAction, duckVolume, rampMs, perSite).
+function applyConfig(cfg) {
+  const perSite = (cfg.sites || [])
+    .filter((r) => r && r.host && (r.action === "pause" || r.action === "duck"))
+    .map((r) => `${r.host} = ${r.action}`)
+    .join("\n");
+  const data = { perSite };
+  if (typeof cfg.defaultAction === "string") data.defaultAction = cfg.defaultAction;
+  if (typeof cfg.duckVolume === "number") data.duckVolume = cfg.duckVolume;
+  if (typeof cfg.rampMs === "number") data.rampMs = cfg.rampMs;
+  try { api.storage.local.set(data); } catch {}
 }
 
 async function setDucking(on) {

@@ -139,6 +139,54 @@ code{background:var(--bg2);border:1px solid var(--border);border-radius:5px;padd
 .liblist::-webkit-scrollbar{width:9px}
 .liblist::-webkit-scrollbar-thumb{background:var(--panel2);border-radius:8px;border:2px solid var(--bg2)}
 
+/* ---- websites screen ---- */
+.seg{display:inline-flex;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:4px;gap:4px}
+.seg-btn{border:0;background:transparent;color:var(--muted);font:inherit;font-weight:600;
+  padding:9px 18px;border-radius:7px;cursor:pointer;transition:background .14s,color .14s,transform .05s}
+.seg-btn:hover{color:var(--text)}
+.seg-btn:active{transform:translateY(1px)}
+.seg-btn.active{background:var(--accent);color:#fff}
+.seg-btn.active[data-action="pause"]{background:var(--accent);color:#fff}
+.seg-btn.active[data-action="duck"]{background:var(--good);color:#06241b}
+.seg.sm{padding:3px;gap:3px}
+.seg.sm .seg-btn{padding:6px 14px;font-size:12.5px}
+.sitelist{display:flex;flex-direction:column;gap:8px}
+.siterow{display:flex;align-items:center;gap:12px;padding:8px 10px 8px 13px;background:var(--bg2);
+  border:1px solid var(--border);border-radius:9px}
+.siterow .host{font-weight:600;font-family:ui-monospace,monospace;font-size:13px}
+.siterow .seg{margin-left:auto}
+
+/* ---- general / version row ---- */
+.verline{display:flex;align-items:center;gap:12px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)}
+.verline .muted{color:var(--muted);font-size:13px}
+.updwrap{margin-left:auto;display:flex;align-items:center;gap:11px}
+.updtag{color:var(--good);font-weight:600;font-size:12.5px}
+
+/* ---- get extension wizard ---- */
+.btn.mini{padding:6px 12px;font-size:12.5px}
+.btn.mini.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.mini.primary:hover{background:var(--accent-2)}
+.update{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.update a{color:var(--accent);text-decoration:none}
+.update a:hover{text-decoration:underline}
+.urlbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg2);border:1px solid var(--border);
+  border-radius:9px;padding:10px 12px;margin-bottom:14px}
+.urllabel{color:var(--muted);font-size:12.5px}
+.urlbar code{font-size:13px;background:transparent;border:0;color:var(--accent);font-weight:600;padding:0}
+.urlbar .btn{margin-left:auto}
+.steps{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:11px;line-height:1.55}
+.steps li{padding-left:4px}
+.steps li::marker{color:var(--accent);font-weight:700}
+.steps b{color:var(--text)}
+.faq details{border:1px solid var(--border);border-radius:9px;background:var(--bg2);margin-bottom:8px;padding:0 14px}
+.faq details[open]{border-color:var(--accent)}
+.faq summary{cursor:pointer;padding:12px 0;font-weight:600;list-style:none;display:flex;align-items:center}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::before{content:"▸";margin-right:9px;color:var(--muted);transition:transform .15s}
+.faq details[open] summary::before{content:"▾"}
+.faq .ans{padding:0 0 13px 21px;color:var(--muted);line-height:1.6}
+.faq .ans code{font-size:12px}
+
 /* ---- scrollbar ---- */
 .main::-webkit-scrollbar{width:11px}
 .main::-webkit-scrollbar-thumb{background:var(--panel2);border-radius:10px;border:3px solid var(--bg)}

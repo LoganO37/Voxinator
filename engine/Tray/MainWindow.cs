@@ -1,8 +1,12 @@
+using System.Diagnostics;
+using System.IO.Compression;
+using System.Net.Http;
 using System.Text.Json;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using Ducker.Config;
+using Ducker.Update;
 
 namespace Ducker.Tray;
 
@@ -14,24 +18,27 @@ namespace Ducker.Tray;
 public sealed class MainWindow : Form
 {
     private readonly DetectionEngine _engine;
+    private readonly Updater _updater;
     private readonly WebView2 _web;
     private bool _ready;
     private bool _quitting;
 
-    public MainWindow(DetectionEngine engine)
+    public MainWindow(DetectionEngine engine, Updater updater = null)
     {
         _engine = engine;
+        _updater = updater;
         Text = "Voxinator";
         ClientSize = new System.Drawing.Size(1000, 680);
         MinimumSize = new System.Drawing.Size(840, 560);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = System.Drawing.Color.FromArgb(15, 17, 21);
-        try { Icon = System.Drawing.SystemIcons.Application; } catch { }
+        try { Icon = AppIcon.Load(); } catch { }
 
         _web = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = System.Drawing.Color.FromArgb(15, 17, 21) };
         Controls.Add(_web);
 
         _engine.StateChanged += OnEngineStateChanged;
+        if (_updater != null) _updater.StagedChanged += OnEngineStateChanged; // re-push when an update stages
         Load += async (_, __) => await InitAsync();
         FormClosing += OnFormClosing;
     }
@@ -95,6 +102,21 @@ public sealed class MainWindow : Form
             case "saveSettings": return SaveSettings(args);
             case "addSource": AddSourceCmd(args); Persist(); return GamesInfo();
             case "removeSource": _engine.RemoveSource(args.GetProperty("name").GetString()); Persist(); return GamesInfo();
+            case "websites": return WebsitesInfo();
+            case "setDefaultAction": _engine.SetDefaultAction(args.GetProperty("action").GetString()); return WebsitesInfo();
+            case "setDuckVolume": _engine.SetDuckVolume((float)args.GetProperty("value").GetDouble()); return WebsitesInfo();
+            case "setRampMs": _engine.SetRampMs(args.GetProperty("value").GetInt32()); return WebsitesInfo();
+            case "setSite": _engine.SetSite(args.GetProperty("host").GetString(), args.GetProperty("action").GetString()); return WebsitesInfo();
+            case "removeSite": _engine.RemoveSite(args.GetProperty("host").GetString()); return WebsitesInfo();
+            case "extensionInfo": return ExtensionInfo();
+            case "checkUpdate": StartUpdateCheck(); return null;
+            case "getExtension": return GetExtension();
+            case "downloadZip": return DownloadZip();
+            case "copyText": CopyText(args.GetProperty("text").GetString()); return null;
+            case "openUrl": OpenUrl(args.GetProperty("url").GetString()); return null;
+            case "seenWizard": _engine.Settings.ExtensionWizardSeen = true; Persist(); return null;
+            case "setStartup": AutoStart.Set(args.GetProperty("on").GetBoolean()); return Snapshot();
+            case "restartToUpdate": _updater?.RestartToApply(); return null;
             default: return null;
         }
     }
@@ -122,6 +144,134 @@ public sealed class MainWindow : Form
         return new { autoDetect = _engine.Settings.AutoDetectGames, monitored, audioApps, library };
     }
 
+    private object WebsitesInfo()
+    {
+        var s = _engine.Settings;
+        var sites = (s.Sites ?? new List<SiteRule>())
+            .Where(r => !string.IsNullOrWhiteSpace(r.Host))
+            .Select(r => new { host = r.Host, action = r.Action })
+            .OrderBy(r => r.host, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return new
+        {
+            defaultAction = s.DefaultAction,
+            duckVolume = s.DuckVolume,
+            rampMs = s.RampMs,
+            extensionClients = _engine.ExtensionClients,
+            sites,
+        };
+    }
+
+    // ---- Get Extension wizard ----
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(8) };
+    private const string RepoUrl = "https://github.com/LoganO37/Voxinator";
+    private const string RemoteManifestUrl =
+        "https://raw.githubusercontent.com/LoganO37/Voxinator/main/extension/manifest.json";
+
+    private static string BundledExtensionDir => Path.Combine(AppContext.BaseDirectory, "extension");
+    private static string InstalledExtensionDir => Path.Combine(EngineSettings.Dir, "extension");
+
+    private object ExtensionInfo() => new
+    {
+        bundledVersion = ReadManifestVersion(Path.Combine(BundledExtensionDir, "manifest.json")) ?? "?",
+        folderPath = InstalledExtensionDir,
+        repoUrl = RepoUrl,
+    };
+
+    private static string ReadManifestVersion(string path)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            return doc.RootElement.TryGetProperty("version", out var v) ? v.GetString() : null;
+        }
+        catch { return null; }
+    }
+
+    // Best-effort GitHub check: compare the bundled extension version to the one on main, and
+    // push the result to the UI as an event (the bridge call returns immediately).
+    private void StartUpdateCheck()
+    {
+        var bundled = ReadManifestVersion(Path.Combine(BundledExtensionDir, "manifest.json"));
+        _ = Task.Run(async () =>
+        {
+            string latest = null; bool available = false;
+            try
+            {
+                var json = await Http.GetStringAsync(RemoteManifestUrl);
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("version", out var v)) latest = v.GetString();
+                available = Version.TryParse(bundled, out var b) && Version.TryParse(latest, out var l) && l > b;
+            }
+            catch (Exception ex) { TrayLogger.Log("update check failed: " + ex.Message); }
+            PostEvent("extUpdate", new { bundledVersion = bundled, latestVersion = latest, updateAvailable = available });
+        });
+    }
+
+    // Copy the bundled extension into a stable per-user folder (survives app updates and is a
+    // good fixed path for Chrome's "Load unpacked"), then reveal it in Explorer.
+    private object GetExtension()
+    {
+        try
+        {
+            CopyDir(BundledExtensionDir, InstalledExtensionDir);
+            try { Process.Start(new ProcessStartInfo("explorer.exe", $"\"{InstalledExtensionDir}\"") { UseShellExecute = true }); } catch { }
+            return new { path = InstalledExtensionDir };
+        }
+        catch (Exception ex) { TrayLogger.Log("getExtension failed: " + ex.Message); return new { error = ex.Message }; }
+    }
+
+    private object DownloadZip()
+    {
+        try
+        {
+            using var dlg = new SaveFileDialog
+            {
+                Title = "Save Voxinator extension",
+                FileName = "voxinator-extension.zip",
+                Filter = "Zip archive (*.zip)|*.zip",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return null;
+            if (File.Exists(dlg.FileName)) File.Delete(dlg.FileName);
+            ZipFile.CreateFromDirectory(BundledExtensionDir, dlg.FileName);
+            try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{dlg.FileName}\"") { UseShellExecute = true }); } catch { }
+            return new { path = dlg.FileName };
+        }
+        catch (Exception ex) { TrayLogger.Log("downloadZip failed: " + ex.Message); return new { error = ex.Message }; }
+    }
+
+    private void CopyText(string text)
+    {
+        try { if (!string.IsNullOrEmpty(text)) Clipboard.SetText(text); } catch { }
+    }
+
+    private static void OpenUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return;
+        if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return; // only external https
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+    }
+
+    private static void CopyDir(string src, string dst)
+    {
+        Directory.CreateDirectory(dst);
+        foreach (var file in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(src, file);
+            var target = Path.Combine(dst, rel);
+            Directory.CreateDirectory(Path.GetDirectoryName(target));
+            File.Copy(file, target, overwrite: true);
+        }
+    }
+
+    private void PostEvent(string name, object data)
+    {
+        if (!_ready || IsDisposed) return;
+        try { BeginInvoke(new Action(() => { try { _web.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { @event = name, data })); } catch { } })); }
+        catch { }
+    }
+
     private void Persist()
     {
         try { _engine.Settings.Save(); } catch (Exception ex) { TrayLogger.Log("save failed: " + ex.Message); }
@@ -140,6 +290,11 @@ public sealed class MainWindow : Form
             ducking = _engine.Ducking,
             status = _engine.StatusSummary(),
             extensionClients = _engine.ExtensionClients,
+            firstRun = !s.ExtensionWizardSeen,
+            appVersion = _updater?.CurrentVersion ?? "",
+            updateStaged = _updater?.UpdateStaged ?? false,
+            updateVersion = _updater?.StagedVersion ?? "",
+            launchOnStartup = AutoStart.IsEnabled(),
             sources,
             settings = new { threshold = s.Threshold, minSpeechMs = s.MinSpeechMs, endBufferMs = s.EndBufferMs, port = s.Port, token = s.Token },
         };

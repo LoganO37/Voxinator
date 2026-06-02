@@ -10,7 +10,13 @@
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">🔊</div>
+        <div class="brand-mark">
+          <svg viewBox="0 0 100 100" width="22" height="22" aria-hidden="true">
+            <path fill="#fff" d="M24 42 H36 L52 30 V70 L36 58 H24 Z"/>
+            <path fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" d="M60.6 39 A14 14 0 0 1 60.6 61"/>
+            <path fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" d="M66.8 31 A24 24 0 0 1 66.8 69"/>
+          </svg>
+        </div>
         <div class="brand-name">Voxinator</div>
       </div>
       <nav class="nav">
@@ -71,6 +77,24 @@
           <h1>Settings</h1>
           <p class="sub">Detection tuning and the local connection the browser extension uses.</p>
         </header>
+
+        <div class="card">
+          <div class="card-title">General</div>
+          <div class="toggle-row">
+            <div>
+              <div class="row-title">Launch when Windows starts</div>
+              <div class="row-sub">Start Voxinator automatically and keep it running in the tray.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="tglStartup" /><span class="slider"></span></label>
+          </div>
+          <div class="verline">
+            <span id="appVer" class="muted">Version —</span>
+            <span id="updWrap" class="updwrap" style="display:none">
+              <span class="updtag" id="updTag">Update ready</span>
+              <button class="btn mini primary" id="btnRestart">Restart now</button>
+            </span>
+          </div>
+        </div>
 
         <div class="card">
           <div class="card-title">Detection</div>
@@ -144,22 +168,93 @@
       </section>
 
       <section class="view" id="view-websites">
-        <header class="view-head"><h1>Websites</h1></header>
-        <div class="card soon">
-          <div class="soon-ico">🌐</div>
-          <div class="card-title">Coming in the next update</div>
-          <p>Per-site rules with one-tap <b>Pause</b> / <b>Duck</b> buttons, duck level, and fade speed —
-             moving here from the extension so every setting lives in one place.</p>
+        <header class="view-head">
+          <h1>Websites</h1>
+          <p class="sub">How browser media reacts to dialog. Changes apply instantly through the extension.</p>
+        </header>
+
+        <div class="card">
+          <div class="card-title">Default behavior</div>
+          <div class="row-sub" style="margin-bottom:14px">Used for any site without its own rule below.</div>
+          <div class="seg" id="wDefault">
+            <button class="seg-btn" data-action="pause">⏸&nbsp; Pause</button>
+            <button class="seg-btn" data-action="duck">🔉&nbsp; Duck</button>
+          </div>
+          <div class="hint" style="margin-top:10px"><b>Pause</b> = hard stop (best for videos &amp; audiobooks).
+            <b>Duck</b> = lower the volume, then restore it (best for music).</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Duck level &amp; fade</div>
+          <div class="field">
+            <label>Duck to <span class="val" id="vDuck"></span></label>
+            <input type="range" id="wDuck" min="0" max="100" step="5" />
+            <div class="hint">Target volume while ducking. Lower is quieter.</div>
+          </div>
+          <div class="field">
+            <label>Fade speed <span class="val" id="vRamp"></span></label>
+            <input type="range" id="wRamp" min="0" max="2000" step="50" />
+            <div class="hint">How quickly the volume ramps down and back up. 0 = instant.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Site rules</div>
+          <div class="addrow">
+            <input type="text" id="wAddHost" placeholder="Add a site, e.g. soundcloud.com" />
+            <button class="btn primary" id="wAddBtn">Add</button>
+          </div>
+          <div id="wSites" class="sitelist"></div>
+        </div>
+
+        <div class="card toggle-row">
+          <div>
+            <div class="row-title">Browser extension</div>
+            <div class="row-sub">Required for Voxinator to control YouTube, Spotify, and other sites.</div>
+          </div>
+          <span class="ext-chip" id="wExtChip">—</span>
         </div>
       </section>
 
       <section class="view" id="view-extension">
-        <header class="view-head"><h1>Get the extension</h1></header>
-        <div class="card soon">
-          <div class="soon-ico">🧩</div>
-          <div class="card-title">Coming in the next update</div>
-          <p>Install the Chrome and/or Firefox add-on with step-by-step instructions and an FAQ.
-             This page will appear automatically on first launch.</p>
+        <header class="view-head">
+          <h1>Get the extension</h1>
+          <p class="sub">Voxinator controls your browser through a small add-on. Install it once — about two minutes.</p>
+        </header>
+
+        <div class="card update" id="extUpdateCard" style="display:none"></div>
+
+        <div class="card">
+          <div class="card-title">1 · Choose your browser</div>
+          <div class="seg" id="extBrowser">
+            <button class="seg-btn active" data-b="chrome">Chrome / Edge</button>
+            <button class="seg-btn" data-b="firefox">Firefox</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">2 · Get the files</div>
+          <div class="row-sub" style="margin-bottom:13px">We'll copy the extension to a folder and open it for you.</div>
+          <div class="actions">
+            <button class="btn primary" id="extGet">📂 Get extension &amp; open folder</button>
+            <button class="btn" id="extZip">Save as .zip</button>
+          </div>
+          <div class="hint" id="extPath" style="margin-top:11px"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">3 · Install it</div>
+          <div class="urlbar">
+            <span class="urllabel">Open this in your browser:</span>
+            <code id="extUrl"></code>
+            <button class="btn mini" id="extCopyUrl">Copy</button>
+          </div>
+          <ol class="steps" id="extSteps"></ol>
+        </div>
+
+        <div class="card">
+          <div class="card-title">FAQ &amp; common mistakes</div>
+          <div id="extFaq" class="faq"></div>
         </div>
       </section>
     </main>

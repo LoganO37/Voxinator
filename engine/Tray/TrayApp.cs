@@ -1,5 +1,6 @@
 using System.Windows.Forms;
 using Ducker.Config;
+using Ducker.Update;
 
 namespace Ducker.Tray;
 
@@ -14,20 +15,24 @@ public sealed class TrayApp : ApplicationContext
     private readonly DetectionEngine _engine;
     private readonly NotifyIcon _icon;
     private readonly Form _anchor;
+    private readonly Updater _updater;
+    private readonly SingleInstance _single;
     private MainWindow _window;
     private readonly ToolStripMenuItem _statusItem;
     private readonly ToolStripMenuItem _sourcesItem;
     private readonly ToolStripMenuItem _enabledItem;
     private readonly ToolStripMenuItem _autoDetectItem;
 
-    public TrayApp(string modelPath)
+    public TrayApp(string modelPath, bool startHidden = false, SingleInstance single = null)
     {
+        _single = single;
         _anchor = new Form { ShowInTaskbar = false, FormBorderStyle = FormBorderStyle.None, Visible = false };
         _ = _anchor.Handle; // force handle creation for cross-thread marshaling
 
         var settings = EngineSettings.Load();
         _engine = new DetectionEngine(modelPath, settings) { Log = TrayLogger.Log };
         _engine.StateChanged += () => OnUi(UpdateUi);
+        _updater = new Updater();
 
         _statusItem = new ToolStripMenuItem { Enabled = false };
         _sourcesItem = new ToolStripMenuItem("Sources (games / apps)");
@@ -54,7 +59,7 @@ public sealed class TrayApp : ApplicationContext
 
         _icon = new NotifyIcon
         {
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = AppIcon.Load(),
             Visible = true,
             Text = "Voxinator",
             ContextMenuStrip = menu,
@@ -63,11 +68,16 @@ public sealed class TrayApp : ApplicationContext
 
         _engine.Start(); // resolve saved sources by name and begin capturing
 
-        _window = new MainWindow(_engine);
-        _window.ShowWindow();
+        _window = new MainWindow(_engine, _updater);
+        if (!startHidden) _window.ShowWindow(); // run-at-login (--startup) stays in the tray
+
+        // A second launch (e.g. desktop shortcut while hidden in the tray) signals us to reopen.
+        _single?.ListenForShow(() => OnUi(() => { TrayLogger.Log("show-window signal"); _window?.ShowWindow(); }));
+
+        _ = _updater.CheckAndStageAsync(); // silent background update check
 
         UpdateUi();
-        TrayLogger.Log("app started");
+        TrayLogger.Log(startHidden ? "app started (startup, hidden)" : "app started");
     }
 
     private void OnUi(Action a)
@@ -148,6 +158,8 @@ public sealed class TrayApp : ApplicationContext
         _icon.Dispose();
         _engine.Dispose();
         _anchor.Dispose();
+        _single?.Dispose(); // release the single-instance mutex
+        _updater.ApplyOnExit(); // apply a staged update after we exit (silent)
         ExitThread();
     }
 }

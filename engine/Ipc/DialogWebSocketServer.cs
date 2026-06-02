@@ -25,6 +25,7 @@ public sealed class DialogWebSocketServer : IDisposable
     public int ClientCount => _clients.Count;
     private readonly CancellationTokenSource _cts = new();
     private System.Threading.Timer _pingTimer;
+    private volatile string _config; // latest CONFIG message; replayed to each new client on connect
 
     public DialogWebSocketServer(int port, string token)
     {
@@ -70,6 +71,8 @@ public sealed class DialogWebSocketServer : IDisposable
             var client = new Client { Socket = wsCtx.WebSocket };
             _clients[id] = client;
             Console.WriteLine($"[ws] extension connected ({_clients.Count} client(s))");
+            var cfg = _config; // replay current behavior config so a freshly-connected extension is in sync
+            if (cfg != null) _ = SendTo(id, client, Encoding.UTF8.GetBytes(cfg));
             _ = Task.Run(() => ReceiveLoop(id, client));
         }
     }
@@ -100,6 +103,14 @@ public sealed class DialogWebSocketServer : IDisposable
         var bytes = Encoding.UTF8.GetBytes(json);
         foreach (var kv in _clients)
             _ = SendTo(kv.Key, kv.Value, bytes);
+    }
+
+    /// <summary>Store the latest behavior config and push it to all connected clients. New clients
+    /// also receive it on connect.</summary>
+    public void SetConfig(string json)
+    {
+        _config = json;
+        Broadcast(json);
     }
 
     private async Task SendTo(Guid id, Client client, byte[] bytes)

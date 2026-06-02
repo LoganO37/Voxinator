@@ -6,6 +6,7 @@ using Ducker.Tray;
 using Ducker.Vad;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using Velopack;
 
 namespace Ducker;
 
@@ -24,7 +25,15 @@ internal static class Program
     [STAThread] // required for WinForms (tray); capture uses its own MTA thread internally
     private static int Main(string[] args)
     {
-        if (args.Length == 0) { PrintHelp(); return 1; }
+        // Velopack must run first: it handles the install / update / uninstall hook arguments
+        // and exits the process for them. For a normal launch it returns and we continue.
+        VelopackApp.Build().Run();
+
+        // A no-arg launch (Start-Menu / Desktop shortcut, double-click) or a flags-only launch
+        // (e.g. the run-at-login entry passes --startup) opens the GUI. CLI subcommands below
+        // remain available for power users / the headless service.
+        if (args.Length == 0 || args[0].StartsWith("--")) return CmdTray(args);
+
         try
         {
             return args[0].ToLowerInvariant() switch
@@ -324,10 +333,23 @@ internal static class Program
     // ---- tray: system-tray front end (Phase 1) -----------------------------
     private static int CmdTray(string[] args)
     {
+        bool startHidden = Flag(args, "--startup"); // launched at login: boot to tray, no window
+
+        // Single instance: if Voxinator is already running, ask it to surface its window and exit
+        // (a second process would collide with the first on the WebSocket port).
+        var single = new Ducker.Tray.SingleInstance();
+        if (!single.TryAcquire())
+        {
+            if (!startHidden) single.SignalShowWindow();
+            single.Dispose();
+            return 0;
+        }
+
         string model;
         try { model = ModelPath(args); }
         catch (Exception ex)
         {
+            single.Dispose();
             System.Windows.Forms.MessageBox.Show(ex.Message, "Voxinator",
                 System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
             return 1;
@@ -337,7 +359,7 @@ internal static class Program
         System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
         try
         {
-            System.Windows.Forms.Application.Run(new TrayApp(model));
+            System.Windows.Forms.Application.Run(new TrayApp(model, startHidden, single));
         }
         catch (Exception ex)
         {

@@ -2,6 +2,11 @@
 engine/bin/
 engine/obj/
 engine/publish/
+tools/icongen/bin/
+tools/icongen/obj/
+
+# Velopack release artifacts (Setup.exe, nupkgs, update feed)
+Releases/
 
 # Test audio scratch (synthetic clips + local game-audio captures)
 engine/testaudio/

@@ -11,6 +11,13 @@ public sealed class GameSource
     [JsonIgnore] public bool Auto { get; set; } // engine-detected source; transient, not persisted
 }
 
+/// <summary>How the browser extension reacts on a given site: "pause" (hard cut) or "duck" (fade).</summary>
+public sealed class SiteRule
+{
+    public string Host { get; set; }
+    public string Action { get; set; } = "pause"; // "pause" | "duck"
+}
+
 /// <summary>
 /// Persistent engine settings (JSON at %APPDATA%\Voxinator\settings.json).
 /// Loading falls back to defaults on any error and migrates legacy single-game files.
@@ -24,10 +31,38 @@ public sealed class EngineSettings
     public int EndBufferMs { get; set; } = 2000;
     public bool Enabled { get; set; } = true;
     public bool AutoDetectGames { get; set; } = true;
+    /// <summary>Set once the first-run "Get Extension" wizard has been shown.</summary>
+    public bool ExtensionWizardSeen { get; set; } = false;
 
     /// <summary>Processes monitored for speech. Speech in ANY of them ducks media
     /// (e.g. a game's dialog AND a Discord call).</summary>
     public List<GameSource> Sources { get; set; } = new();
+
+    // ---- Browser behavior (pushed to the extension over the WebSocket as a CONFIG message) ----
+    /// <summary>Action for sites without a specific rule: "pause" or "duck".</summary>
+    public string DefaultAction { get; set; } = "pause";
+    /// <summary>Target volume (0..1) when ducking.</summary>
+    public float DuckVolume { get; set; } = 0.2f;
+    /// <summary>Fade duration in ms for ducking (0 = instant).</summary>
+    public int RampMs { get; set; } = 300;
+    /// <summary>Per-site overrides. The most specific (longest) matching host wins in the extension.</summary>
+    public List<SiteRule> Sites { get; set; } = DefaultSites();
+
+    private static List<SiteRule> DefaultSites() => new()
+    {
+        new() { Host = "youtube.com",       Action = "pause" },
+        new() { Host = "youtu.be",          Action = "pause" },
+        new() { Host = "audible.com",       Action = "pause" },
+        new() { Host = "open.spotify.com",  Action = "duck" },
+        new() { Host = "music.youtube.com", Action = "duck" },
+        new() { Host = "music.apple.com",   Action = "duck" },
+        new() { Host = "music.amazon.com",  Action = "duck" },
+        new() { Host = "soundcloud.com",    Action = "duck" },
+        new() { Host = "tidal.com",         Action = "duck" },
+        new() { Host = "pandora.com",       Action = "duck" },
+        new() { Host = "deezer.com",        Action = "duck" },
+        new() { Host = "bandcamp.com",      Action = "duck" },
+    };
 
     // Legacy single-source fields (pre multi-source); migrated to Sources on load.
     public uint? GamePid { get; set; }
@@ -55,6 +90,7 @@ public sealed class EngineSettings
     private void Migrate()
     {
         Sources ??= new();
+        Sites ??= DefaultSites();
         if (Sources.Count == 0 && !string.IsNullOrEmpty(GameProcessName))
             Sources.Add(new GameSource { ProcessName = GameProcessName, Pid = GamePid });
         GamePid = null;
@@ -71,6 +107,7 @@ public sealed class EngineSettings
     {
         var c = (EngineSettings)MemberwiseClone();
         c.Sources = Sources.Select(x => new GameSource { ProcessName = x.ProcessName, Pid = x.Pid }).ToList();
+        c.Sites = Sites.Select(x => new SiteRule { Host = x.Host, Action = x.Action }).ToList();
         return c;
     }
 }

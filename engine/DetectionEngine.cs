@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Ducker.Capture;
 using Ducker.Config;
 using Ducker.Interop;
@@ -176,7 +177,82 @@ public sealed class DetectionEngine : IDisposable
         _ws.Start();
         _wsPort = port;
         _wsToken = token;
+        try { _ws.SetConfig(BuildConfigJson()); } catch { } // seed the new server with current behavior config
         Log?.Invoke($"WebSocket listening on ws://127.0.0.1:{port}/");
+    }
+
+    // ---- browser behavior config (pushed to the extension) ----
+
+    // Serialize the current site rules + duck/ramp/default-action into the CONFIG message the
+    // extension consumes. Safe to call single-threaded (ctor) or under _lock.
+    private string BuildConfigJson()
+    {
+        var s = _settings;
+        var sites = (s.Sites ?? new List<SiteRule>())
+            .Where(r => !string.IsNullOrWhiteSpace(r.Host))
+            .Select(r => new { host = r.Host.Trim().ToLowerInvariant(), action = NormAction(r.Action) });
+        return JsonSerializer.Serialize(new
+        {
+            type = "CONFIG",
+            defaultAction = NormAction(s.DefaultAction),
+            duckVolume = s.DuckVolume,
+            rampMs = s.RampMs,
+            sites,
+        });
+    }
+
+    public void BroadcastConfig()
+    {
+        string json;
+        lock (_lock) json = BuildConfigJson();
+        try { _ws?.SetConfig(json); } catch { }
+    }
+
+    public void SetDefaultAction(string action)
+    {
+        lock (_lock) _settings.DefaultAction = NormAction(action);
+        PersistAndPushConfig();
+    }
+
+    public void SetDuckVolume(float v)
+    {
+        lock (_lock) _settings.DuckVolume = Math.Clamp(v, 0f, 1f);
+        PersistAndPushConfig();
+    }
+
+    public void SetRampMs(int ms)
+    {
+        lock (_lock) _settings.RampMs = Math.Clamp(ms, 0, 10000);
+        PersistAndPushConfig();
+    }
+
+    public void SetSite(string host, string action)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return;
+        lock (_lock)
+        {
+            host = host.Trim().ToLowerInvariant();
+            var r = _settings.Sites.FirstOrDefault(x => NameEq(x.Host, host));
+            if (r != null) r.Action = NormAction(action);
+            else _settings.Sites.Add(new SiteRule { Host = host, Action = NormAction(action) });
+        }
+        PersistAndPushConfig();
+    }
+
+    public void RemoveSite(string host)
+    {
+        lock (_lock) _settings.Sites.RemoveAll(x => NameEq(x.Host, host));
+        PersistAndPushConfig();
+    }
+
+    private static string NormAction(string a) =>
+        string.Equals(a, "duck", StringComparison.OrdinalIgnoreCase) ? "duck" : "pause";
+
+    private void PersistAndPushConfig()
+    {
+        try { _settings.Save(); } catch (Exception ex) { Log?.Invoke("save failed: " + ex.Message); }
+        BroadcastConfig();
+        RaiseState();
     }
 
     // Manual sources (from settings) plus auto-detected running games, de-duped by name
