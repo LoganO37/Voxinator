@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Ducker.Audio;
 using Ducker.Capture;
 using Ducker.Config;
 using Ducker.Interop;
@@ -48,6 +49,7 @@ public sealed class DetectionEngine : IDisposable
     private EngineSettings _settings;
     private readonly GameLibrary _library;
     private readonly List<GameSource> _autoSources = new(); // engine-detected games (transient)
+    private readonly NativeDucker _native = new();          // ducks other apps via the Windows mixer
 
     public bool Ducking { get; private set; }
     public int ExtensionClients => _ws?.ClientCount ?? 0; // browser extensions connected to the WS
@@ -370,12 +372,34 @@ public sealed class DetectionEngine : IDisposable
     {
         if (Ducking == on) return;
         Ducking = on;
-        Log?.Invoke(on ? ">>> DUCK (broadcast DIALOG_START)" : "<<< UNDUCK (broadcast DIALOG_END)");
+        Log?.Invoke(on ? ">>> DUCK (native + DIALOG_START)" : "<<< UNDUCK (native + DIALOG_END)");
+        // Native per-app ducking via the Windows mixer (the new default path).
+        try { _native.SetDucked(on, _settings.DuckVolume, _settings.RampMs, ExcludeNamesLocked()); }
+        catch (Exception ex) { Log?.Invoke("native duck failed: " + ex.Message); }
+        // Browser extension over the WebSocket (kept in parallel until the native path is proven;
+        // removed in Phase 4). If the extension is connected this double-ducks the browser — test
+        // native with the extension disconnected.
         _ws?.Broadcast(on
             ? $"{{\"type\":\"DIALOG_START\",\"ts\":{Now()}}}"
             : $"{{\"type\":\"DIALOG_END\",\"ts\":{Now()}}}");
         DuckChanged?.Invoke(on);
         RaiseState();
+    }
+
+    // Process names the native ducker must never touch: every monitored source (you never duck the
+    // thing you're detecting dialog on), Voxinator itself, and the user's ignore list.
+    private HashSet<string> ExcludeNamesLocked()
+    {
+        var ex = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in EffectiveSourcesLocked())
+            if (!string.IsNullOrWhiteSpace(s.ProcessName)) ex.Add(s.ProcessName);
+        foreach (var m in _monitors)
+            if (!string.IsNullOrWhiteSpace(m.ProcessName)) ex.Add(m.ProcessName);
+        if (_settings.IgnoredApps != null)
+            foreach (var n in _settings.IgnoredApps)
+                if (!string.IsNullOrWhiteSpace(n)) ex.Add(n);
+        try { ex.Add(Process.GetCurrentProcess().ProcessName); } catch { }
+        return ex;
     }
 
     // Every tick: re-resolve PIDs, drop dead captures, and retry any source that isn't
@@ -417,6 +441,7 @@ public sealed class DetectionEngine : IDisposable
     public void Dispose()
     {
         try { _watchdog?.Dispose(); } catch { }
+        try { _native.Dispose(); } catch { }
         lock (_lock)
         {
             foreach (var m in _monitors) m.Dispose();

@@ -49,6 +49,11 @@ public sealed class EngineSettings
     /// <summary>Per-site overrides. The most specific (longest) matching host wins in the extension.</summary>
     public List<SiteRule> Sites { get; set; } = DefaultSites();
 
+    /// <summary>Native ducking model ("all apps except these"): process names (with or without
+    /// .exe) that are never ducked/paused even though they aren't the monitored game — e.g. voice
+    /// chat. The monitored game(s) and Voxinator itself are always excluded automatically.</summary>
+    public List<string> IgnoredApps { get; set; } = new();
+
     // Only sites we've actually verified ship as defaults. Users can add others (Spotify,
     // Bandcamp, etc.) themselves in the Websites tab — the extension supports more than this.
     private static List<SiteRule> DefaultSites() => new()
@@ -87,6 +92,7 @@ public sealed class EngineSettings
     {
         Sources ??= new();
         Sites ??= DefaultSites();
+        IgnoredApps ??= new();
         if (Sources.Count == 0 && !string.IsNullOrEmpty(GameProcessName))
             Sources.Add(new GameSource { ProcessName = GameProcessName, Pid = GamePid });
         GamePid = null;
@@ -104,6 +110,7 @@ public sealed class EngineSettings
         var c = (EngineSettings)MemberwiseClone();
         c.Sources = Sources.Select(x => new GameSource { ProcessName = x.ProcessName, Pid = x.Pid }).ToList();
         c.Sites = Sites.Select(x => new SiteRule { Host = x.Host, Action = x.Action }).ToList();
+        c.IgnoredApps = IgnoredApps?.ToList() ?? new();
         return c;
     }
 }
