@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
@@ -169,7 +170,36 @@ public sealed class MainWindow : Form
         "https://raw.githubusercontent.com/LoganO37/Voxinator/main/extension/manifest.json";
 
     private static string BundledExtensionDir => Path.Combine(AppContext.BaseDirectory, "extension");
-    private static string InstalledExtensionDir => Path.Combine(EngineSettings.Dir, "extension");
+
+    // The unpacked extension is copied into the user's Downloads folder rather than %APPDATA%:
+    // it's a visible, well-known location, so "Load unpacked" points at a short, obvious path
+    // (e.g. C:\Users\<you>\Downloads\Voxinator-extension) instead of a long hidden AppData path.
+    private static string InstalledExtensionDir => Path.Combine(DownloadsDir, "Voxinator-extension");
+
+    // FOLDERID_Downloads. There's no Environment.SpecialFolder for Downloads, and it can be
+    // relocated off %USERPROFILE%, so ask the shell for the real path; fall back to the default.
+    private static readonly Guid FolderIdDownloads = new("374DE290-123F-4565-9164-39C4925E467B");
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int SHGetKnownFolderPath(
+        [MarshalAs(UnmanagedType.LPStruct)] Guid rfid, uint dwFlags, IntPtr hToken, out IntPtr ppszPath);
+
+    private static string DownloadsDir
+    {
+        get
+        {
+            try
+            {
+                if (SHGetKnownFolderPath(FolderIdDownloads, 0, IntPtr.Zero, out var ptr) == 0)
+                {
+                    try { var p = Marshal.PtrToStringUni(ptr); if (!string.IsNullOrEmpty(p)) return p; }
+                    finally { Marshal.FreeCoTaskMem(ptr); }
+                }
+            }
+            catch { /* fall through to the conventional location */ }
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        }
+    }
 
     private object ExtensionInfo() => new
     {
