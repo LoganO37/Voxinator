@@ -32,6 +32,20 @@ internal static class AutoStart
         catch { /* registry access denied / locked-down machine */ }
     }
 
+    /// <summary>
+    /// Deletes the per-user Run value if present. Velopack's uninstaller knows nothing about this
+    /// key, so the uninstall hook must call this — otherwise it lingers and points at a deleted exe.
+    /// </summary>
+    public static void Remove()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
+            if (key?.GetValue(ValueName) != null) key.DeleteValue(ValueName, throwOnMissingValue: false);
+        }
+        catch { /* registry access denied / locked-down machine */ }
+    }
+
     // Velopack installs a stable stub named after the packId at the install root (the parent of
     // the versioned "current" folder). Fall back to the running exe when not installed (dev).
     private static string LauncherPath()

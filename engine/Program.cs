@@ -25,7 +25,11 @@ internal static class Program
     {
         // Velopack must run first: it handles the install / update / uninstall hook arguments
         // and exits the process for them. For a normal launch it returns and we continue.
-        VelopackApp.Build().Run();
+        // The uninstall hook removes our autostart Run value — Velopack doesn't know about it,
+        // so without this it would linger and point at a deleted exe after uninstall.
+        VelopackApp.Build()
+            .OnBeforeUninstallFastCallback(_ => AutoStart.Remove())
+            .Run();
 
         // A no-arg launch (Start-Menu / Desktop shortcut, double-click) or a flags-only launch
         // (e.g. the run-at-login entry passes --startup) opens the GUI. CLI subcommands below
