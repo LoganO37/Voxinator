@@ -15,21 +15,6 @@ internal static class IconGen
 
     private static int Main(string[] args)
     {
-        // Alternate mode: emit browser-extension PNG icons (16/32/48/128) into a folder.
-        //   dotnet run --project tools/icongen -- --pngs <outDir>
-        if (args.Length >= 2 && args[0] == "--pngs")
-        {
-            string outDir = args[1];
-            Directory.CreateDirectory(outDir);
-            foreach (var s in new[] { 16, 32, 48, 128 })
-            {
-                using var bmp = RenderLogo(s);
-                bmp.Save(Path.Combine(outDir, $"icon{s}.png"), ImageFormat.Png);
-            }
-            Console.WriteLine($"wrote extension PNG icons (16/32/48/128) to {outDir}");
-            return 0;
-        }
-
         string ico = args.Length > 0 ? args[0] : "voxinator.ico";
         string splash = args.Length > 1 ? args[1] : "splash.png";
 

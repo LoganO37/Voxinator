@@ -126,16 +126,6 @@ public sealed class TrayApp : ApplicationContext
         _sourcesItem.DropDownItems.Add(item);
     }
 
-    private void OpenSettings()
-    {
-        using var form = new SettingsForm(_engine.Settings.Clone());
-        if (form.ShowDialog() == DialogResult.OK && form.Result != null)
-        {
-            _engine.ApplySettings(form.Result); // Result keeps current Sources + Enabled
-            try { form.Result.Save(); } catch (Exception ex) { TrayLogger.Log($"save failed: {ex.Message}"); }
-        }
-    }
-
     private void UpdateUi()
     {
         var status = _engine.StatusSummary();

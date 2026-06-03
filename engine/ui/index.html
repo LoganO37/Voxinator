@@ -22,9 +22,8 @@
       <nav class="nav">
         <button class="nav-item active" data-view="dashboard"><span class="nav-ico">🎛️</span> Dashboard</button>
         <button class="nav-item" data-view="games"><span class="nav-ico">🎮</span> Games</button>
-        <button class="nav-item" data-view="websites"><span class="nav-ico">🌐</span> Websites</button>
+        <button class="nav-item" data-view="apps"><span class="nav-ico">🔊</span> Apps</button>
         <button class="nav-item" data-view="settings"><span class="nav-ico">⚙️</span> Settings</button>
-        <button class="nav-item" data-view="extension"><span class="nav-ico">🧩</span> Get Extension</button>
       </nav>
       <div class="sidebar-foot">
         <div class="state-dot" id="footDot"></div>
@@ -46,7 +45,6 @@
             <div class="status-title" id="statusTitle">Idle</div>
             <div class="status-sub" id="statusSub">Waiting…</div>
           </div>
-          <div class="ext-chip" id="extChip">Extension: —</div>
         </div>
 
         <div class="card toggle-row">
@@ -75,7 +73,7 @@
       <section class="view" id="view-settings">
         <header class="view-head">
           <h1>Settings</h1>
-          <p class="sub">Detection tuning and the local connection the browser extension uses.</p>
+          <p class="sub">Detection tuning.</p>
         </header>
 
         <div class="card">
@@ -113,15 +111,6 @@
             <input type="range" id="setEnd" min="0" max="5000" step="50" />
             <div class="hint">Keeps media ducked through natural pauses between lines.</div>
           </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">Connection</div>
-          <div class="grid2">
-            <div class="field"><label>WebSocket port</label><input type="number" id="setPort" min="1" max="65535" /></div>
-            <div class="field"><label>Token</label><input type="text" id="setToken" /></div>
-          </div>
-          <div class="hint">The browser extension connects to <code>ws://127.0.0.1:&lt;port&gt;</code> using this token.</div>
         </div>
 
         <div class="actions">
@@ -167,94 +156,47 @@
         </div>
       </section>
 
-      <section class="view" id="view-websites">
+      <section class="view" id="view-apps">
         <header class="view-head">
-          <h1>Websites</h1>
-          <p class="sub">How browser media reacts to dialog. Changes apply instantly through the extension.</p>
+          <h1>Apps</h1>
+          <p class="sub">How other apps react when dialog is detected. Voxinator controls them natively — no browser extension needed.</p>
         </header>
 
         <div class="card">
           <div class="card-title">Default behavior</div>
-          <div class="row-sub" style="margin-bottom:14px">Used for any site without its own rule below.</div>
-          <div class="seg" id="wDefault">
-            <button class="seg-btn" data-action="pause">⏸&nbsp; Pause</button>
+          <div class="row-sub" style="margin-bottom:14px">Applied to every app playing audio — except your game and anything set to <b>Ignore</b> below.</div>
+          <div class="seg" id="aDefault">
             <button class="seg-btn" data-action="duck">🔉&nbsp; Duck</button>
+            <button class="seg-btn" data-action="pause">⏸&nbsp; Pause</button>
           </div>
-          <div class="hint" style="margin-top:10px"><b>Pause</b> = hard stop (best for videos &amp; audiobooks).
-            <b>Duck</b> = lower the volume, then restore it (best for music).</div>
+          <div class="hint" style="margin-top:10px"><b>Duck</b> = lower the volume, then fade it back (best for music).
+            <b>Pause</b> = stop playback via the app's media controls (best for videos &amp; audiobooks). Apps that can't be paused are ducked instead.</div>
         </div>
 
         <div class="card">
           <div class="card-title">Duck level &amp; fade</div>
           <div class="field">
             <label>Duck to <span class="val" id="vDuck"></span></label>
-            <input type="range" id="wDuck" min="0" max="100" step="5" />
+            <input type="range" id="aDuck" min="0" max="100" step="5" />
             <div class="hint">Target volume while ducking. Lower is quieter.</div>
           </div>
           <div class="field">
             <label>Fade back in <span class="val" id="vRamp"></span></label>
-            <input type="range" id="wRamp" min="0" max="2000" step="50" />
+            <input type="range" id="aRamp" min="0" max="2000" step="50" />
             <div class="hint">The volume cut is instant; this sets how gradually it fades back in once dialog ends. 0 = instant.</div>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-title">Site rules</div>
+          <div class="card-title">Per-app rules</div>
+          <div class="row-sub" style="margin-bottom:12px">Override the default for a specific app, or set one to <b>Ignore</b> so it's never touched (e.g. voice chat).</div>
           <div class="addrow">
-            <input type="text" id="wAddHost" placeholder="Add a site, e.g. soundcloud.com" />
-            <button class="btn primary" id="wAddBtn">Add</button>
+            <input type="text" id="aAddName" placeholder="App name, e.g. spotify (no .exe)" />
+            <button class="btn primary" id="aAddBtn">Add</button>
           </div>
-          <div id="wSites" class="sitelist"></div>
-        </div>
-
-        <div class="card toggle-row">
-          <div>
-            <div class="row-title">Browser extension</div>
-            <div class="row-sub">Required for Voxinator to control YouTube, Amazon Music, and other sites.</div>
-          </div>
-          <span class="ext-chip" id="wExtChip">—</span>
-        </div>
-      </section>
-
-      <section class="view" id="view-extension">
-        <header class="view-head">
-          <h1>Get the extension</h1>
-          <p class="sub">Voxinator controls your browser through a small add-on. Install it once — about two minutes.</p>
-        </header>
-
-        <div class="card update" id="extUpdateCard" style="display:none"></div>
-
-        <div class="card">
-          <div class="card-title">1 · Choose your browser</div>
-          <div class="seg" id="extBrowser">
-            <button class="seg-btn active" data-b="chrome">Chrome / Edge</button>
-            <button class="seg-btn" data-b="firefox">Firefox</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">2 · Get the files</div>
-          <div class="row-sub" style="margin-bottom:13px">We'll copy the extension to a folder and open it for you.</div>
-          <div class="actions">
-            <button class="btn primary" id="extGet">📂 Get extension &amp; open folder</button>
-            <button class="btn" id="extZip">Save as .zip</button>
-          </div>
-          <div class="hint" id="extPath" style="margin-top:11px"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">3 · Install it</div>
-          <div class="urlbar">
-            <span class="urllabel">Open this in your browser:</span>
-            <code id="extUrl"></code>
-            <button class="btn mini" id="extCopyUrl">Copy</button>
-          </div>
-          <ol class="steps" id="extSteps"></ol>
-        </div>
-
-        <div class="card">
-          <div class="card-title">FAQ &amp; common mistakes</div>
-          <div id="extFaq" class="faq"></div>
+          <div class="sub-label">Currently playing — click to add a rule</div>
+          <div id="aPlaying" class="chips"><div class="empty">No other apps playing audio right now.</div></div>
+          <div id="aRules" class="sitelist"></div>
         </div>
       </section>
     </main>

@@ -1,7 +1,4 @@
 using System.Diagnostics;
-using System.IO.Compression;
-using System.Net.Http;
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
@@ -103,19 +100,14 @@ public sealed class MainWindow : Form
             case "saveSettings": return SaveSettings(args);
             case "addSource": AddSourceCmd(args); Persist(); return GamesInfo();
             case "removeSource": _engine.RemoveSource(args.GetProperty("name").GetString()); Persist(); return GamesInfo();
-            case "websites": return WebsitesInfo();
-            case "setDefaultAction": _engine.SetDefaultAction(args.GetProperty("action").GetString()); return WebsitesInfo();
-            case "setDuckVolume": _engine.SetDuckVolume((float)args.GetProperty("value").GetDouble()); return WebsitesInfo();
-            case "setRampMs": _engine.SetRampMs(args.GetProperty("value").GetInt32()); return WebsitesInfo();
-            case "setSite": _engine.SetSite(args.GetProperty("host").GetString(), args.GetProperty("action").GetString()); return WebsitesInfo();
-            case "removeSite": _engine.RemoveSite(args.GetProperty("host").GetString()); return WebsitesInfo();
-            case "extensionInfo": return ExtensionInfo();
-            case "checkUpdate": StartUpdateCheck(); return null;
-            case "getExtension": return GetExtension();
-            case "downloadZip": return DownloadZip();
+            case "apps": return AppsInfo();
+            case "setDefaultAction": _engine.SetDefaultAction(args.GetProperty("action").GetString()); return AppsInfo();
+            case "setDuckVolume": _engine.SetDuckVolume((float)args.GetProperty("value").GetDouble()); return AppsInfo();
+            case "setRampMs": _engine.SetRampMs(args.GetProperty("value").GetInt32()); return AppsInfo();
+            case "setApp": _engine.SetApp(args.GetProperty("name").GetString(), args.GetProperty("action").GetString()); return AppsInfo();
+            case "removeApp": _engine.RemoveApp(args.GetProperty("name").GetString()); return AppsInfo();
             case "copyText": CopyText(args.GetProperty("text").GetString()); return null;
             case "openUrl": OpenUrl(args.GetProperty("url").GetString()); return null;
-            case "seenWizard": _engine.Settings.ExtensionWizardSeen = true; Persist(); return null;
             case "setStartup": AutoStart.Set(args.GetProperty("on").GetBoolean()); return Snapshot();
             case "restartToUpdate": _updater?.RestartToApply(); return null;
             default: return null;
@@ -145,130 +137,36 @@ public sealed class MainWindow : Form
         return new { autoDetect = _engine.Settings.AutoDetectGames, monitored, audioApps, library };
     }
 
-    private object WebsitesInfo()
+    private object AppsInfo()
     {
         var s = _engine.Settings;
-        var sites = (s.Sites ?? new List<SiteRule>())
-            .Where(r => !string.IsNullOrWhiteSpace(r.Host))
-            .Select(r => new { host = r.Host, action = r.Action })
-            .OrderBy(r => r.host, StringComparer.OrdinalIgnoreCase)
+        var apps = (s.Apps ?? new List<AppRule>())
+            .Where(r => !string.IsNullOrWhiteSpace(r.Name))
+            .Select(r => new { name = r.Name, action = r.Action })
+            .OrderBy(r => r.name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        // Apps currently producing audio that don't already have a rule and aren't a monitored
+        // source — offered in the UI as quick "add a rule" chips.
+        var monitored = new HashSet<string>(_engine.SourceStates().Select(x => x.name), StringComparer.OrdinalIgnoreCase);
+        var ruled = new HashSet<string>(apps.Select(a => a.name), StringComparer.OrdinalIgnoreCase);
+        var playing = ProcessList.AudioSessions()
+            .Select(a => a.ProcessName)
+            .Where(n => !string.IsNullOrWhiteSpace(n)
+                        && !monitored.Contains(n) && !ruled.Contains(n)
+                        && !string.Equals(n, "voxinator", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         return new
         {
             defaultAction = s.DefaultAction,
             duckVolume = s.DuckVolume,
             rampMs = s.RampMs,
-            extensionClients = _engine.ExtensionClients,
-            sites,
+            apps,
+            playing,
         };
-    }
-
-    // ---- Get Extension wizard ----
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(8) };
-    private const string RepoUrl = "https://github.com/LoganO37/Voxinator";
-    private const string RemoteManifestUrl =
-        "https://raw.githubusercontent.com/LoganO37/Voxinator/main/extension/manifest.json";
-
-    private static string BundledExtensionDir => Path.Combine(AppContext.BaseDirectory, "extension");
-
-    // The unpacked extension is copied into the user's Downloads folder rather than %APPDATA%:
-    // it's a visible, well-known location, so "Load unpacked" points at a short, obvious path
-    // (e.g. C:\Users\<you>\Downloads\Voxinator-extension) instead of a long hidden AppData path.
-    private static string InstalledExtensionDir => Path.Combine(DownloadsDir, "Voxinator-extension");
-
-    // FOLDERID_Downloads. There's no Environment.SpecialFolder for Downloads, and it can be
-    // relocated off %USERPROFILE%, so ask the shell for the real path; fall back to the default.
-    private static readonly Guid FolderIdDownloads = new("374DE290-123F-4565-9164-39C4925E467B");
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern int SHGetKnownFolderPath(
-        [MarshalAs(UnmanagedType.LPStruct)] Guid rfid, uint dwFlags, IntPtr hToken, out IntPtr ppszPath);
-
-    private static string DownloadsDir
-    {
-        get
-        {
-            try
-            {
-                if (SHGetKnownFolderPath(FolderIdDownloads, 0, IntPtr.Zero, out var ptr) == 0)
-                {
-                    try { var p = Marshal.PtrToStringUni(ptr); if (!string.IsNullOrEmpty(p)) return p; }
-                    finally { Marshal.FreeCoTaskMem(ptr); }
-                }
-            }
-            catch { /* fall through to the conventional location */ }
-            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-        }
-    }
-
-    private object ExtensionInfo() => new
-    {
-        bundledVersion = ReadManifestVersion(Path.Combine(BundledExtensionDir, "manifest.json")) ?? "?",
-        folderPath = InstalledExtensionDir,
-        repoUrl = RepoUrl,
-    };
-
-    private static string ReadManifestVersion(string path)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(File.ReadAllText(path));
-            return doc.RootElement.TryGetProperty("version", out var v) ? v.GetString() : null;
-        }
-        catch { return null; }
-    }
-
-    // Best-effort GitHub check: compare the bundled extension version to the one on main, and
-    // push the result to the UI as an event (the bridge call returns immediately).
-    private void StartUpdateCheck()
-    {
-        var bundled = ReadManifestVersion(Path.Combine(BundledExtensionDir, "manifest.json"));
-        _ = Task.Run(async () =>
-        {
-            string latest = null; bool available = false;
-            try
-            {
-                var json = await Http.GetStringAsync(RemoteManifestUrl);
-                using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty("version", out var v)) latest = v.GetString();
-                available = Version.TryParse(bundled, out var b) && Version.TryParse(latest, out var l) && l > b;
-            }
-            catch (Exception ex) { TrayLogger.Log("update check failed: " + ex.Message); }
-            PostEvent("extUpdate", new { bundledVersion = bundled, latestVersion = latest, updateAvailable = available });
-        });
-    }
-
-    // Copy the bundled extension into a stable per-user folder (survives app updates and is a
-    // good fixed path for Chrome's "Load unpacked"), then reveal it in Explorer.
-    private object GetExtension()
-    {
-        try
-        {
-            CopyDir(BundledExtensionDir, InstalledExtensionDir);
-            try { Process.Start(new ProcessStartInfo("explorer.exe", $"\"{InstalledExtensionDir}\"") { UseShellExecute = true }); } catch { }
-            return new { path = InstalledExtensionDir };
-        }
-        catch (Exception ex) { TrayLogger.Log("getExtension failed: " + ex.Message); return new { error = ex.Message }; }
-    }
-
-    private object DownloadZip()
-    {
-        try
-        {
-            using var dlg = new SaveFileDialog
-            {
-                Title = "Save Voxinator extension",
-                FileName = "voxinator-extension.zip",
-                Filter = "Zip archive (*.zip)|*.zip",
-                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            };
-            if (dlg.ShowDialog(this) != DialogResult.OK) return null;
-            if (File.Exists(dlg.FileName)) File.Delete(dlg.FileName);
-            ZipFile.CreateFromDirectory(BundledExtensionDir, dlg.FileName);
-            try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{dlg.FileName}\"") { UseShellExecute = true }); } catch { }
-            return new { path = dlg.FileName };
-        }
-        catch (Exception ex) { TrayLogger.Log("downloadZip failed: " + ex.Message); return new { error = ex.Message }; }
     }
 
     private void CopyText(string text)
@@ -281,18 +179,6 @@ public sealed class MainWindow : Form
         if (string.IsNullOrWhiteSpace(url)) return;
         if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return; // only external https
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
-    }
-
-    private static void CopyDir(string src, string dst)
-    {
-        Directory.CreateDirectory(dst);
-        foreach (var file in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
-        {
-            var rel = Path.GetRelativePath(src, file);
-            var target = Path.Combine(dst, rel);
-            Directory.CreateDirectory(Path.GetDirectoryName(target));
-            File.Copy(file, target, overwrite: true);
-        }
     }
 
     private void PostEvent(string name, object data)
@@ -319,14 +205,12 @@ public sealed class MainWindow : Form
             autoDetect = s.AutoDetectGames,
             ducking = _engine.Ducking,
             status = _engine.StatusSummary(),
-            extensionClients = _engine.ExtensionClients,
-            firstRun = !s.ExtensionWizardSeen,
             appVersion = _updater?.CurrentVersion ?? "",
             updateStaged = _updater?.UpdateStaged ?? false,
             updateVersion = _updater?.StagedVersion ?? "",
             launchOnStartup = AutoStart.IsEnabled(),
             sources,
-            settings = new { threshold = s.Threshold, minSpeechMs = s.MinSpeechMs, endBufferMs = s.EndBufferMs, port = s.Port, token = s.Token },
+            settings = new { threshold = s.Threshold, minSpeechMs = s.MinSpeechMs, endBufferMs = s.EndBufferMs },
         };
     }
 
@@ -336,8 +220,6 @@ public sealed class MainWindow : Form
         if (a.TryGetProperty("threshold", out var t)) s.Threshold = (float)t.GetDouble();
         if (a.TryGetProperty("minSpeechMs", out var m)) s.MinSpeechMs = m.GetInt32();
         if (a.TryGetProperty("endBufferMs", out var e)) s.EndBufferMs = e.GetInt32();
-        if (a.TryGetProperty("port", out var p)) s.Port = p.GetInt32();
-        if (a.TryGetProperty("token", out var tk)) s.Token = tk.GetString();
         _engine.ApplySettings(s);
         try { s.Save(); } catch (Exception ex) { TrayLogger.Log("save failed: " + ex.Message); }
         return Snapshot();

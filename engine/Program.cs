@@ -1,7 +1,6 @@
 using Ducker.Capture;
 using Ducker.Config;
 using Ducker.Interop;
-using Ducker.Ipc;
 using Ducker.Tray;
 using Ducker.Vad;
 using NAudio.Wave;
@@ -18,7 +17,6 @@ namespace Ducker;
 ///   vad       -> Spike 2: run Silero VAD over a WAV, print probabilities/segments
 ///   accuracy  -> Spike 3: run VAD over a folder of labeled clips, print confusion matrix
 ///   live      -> Spike 4: capture -> VAD -> debouncer, print DUCK/UNDUCK in real time
-///   serve     -> Spike 5: same as live, plus a local WebSocket server for the extension
 /// </summary>
 internal static class Program
 {
@@ -42,8 +40,7 @@ internal static class Program
                 "capture" => CmdCapture(args),
                 "vad" => CmdVad(args),
                 "accuracy" => CmdAccuracy(args),
-                "live" => CmdLive(args, serve: false),
-                "serve" => CmdLive(args, serve: true),
+                "live" => CmdLive(args),
                 "simlive" => CmdSimLive(args),
                 "service" => CmdService(args),
                 "tray" => CmdTray(args),
@@ -224,8 +221,8 @@ internal static class Program
         return 0;
     }
 
-    // ---- live (Spike 4) / serve (Spike 5) ----------------------------------
-    private static int CmdLive(string[] args, bool serve)
+    // ---- live (Spike 4): raw detection pipeline, prints DUCK/UNDUCK ---------
+    private static int CmdLive(string[] args)
     {
         uint pid = (uint)IntOpt(args, "--pid", -1);
         if (pid == unchecked((uint)-1)) { Console.Error.WriteLine("--pid is required (see `voxinator list`)."); return 1; }
@@ -235,29 +232,11 @@ internal static class Program
         string model = ModelPath(args);
         var mode = exclude ? ProcessLoopbackMode.ExcludeTargetProcessTree : ProcessLoopbackMode.IncludeTargetProcessTree;
 
-        DialogWebSocketServer ws = null;
-        if (serve)
-        {
-            int port = IntOpt(args, "--port", 8730);
-            string token = Opt(args, "--token", "changeme");
-            ws = new DialogWebSocketServer(port, token);
-            ws.Start();
-            Console.WriteLine($"WebSocket server: ws://127.0.0.1:{port}/?token={token}");
-        }
-
         using var vad = new SileroVad(model);
         var deb = new Debouncer(dp);
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        deb.DialogStart += (_, e) =>
-        {
-            Console.WriteLine($"[{sw.Elapsed:mm\\:ss\\.f}] >>> DUCK   (dialog start, p={e.Probability:F2})");
-            ws?.Broadcast($"{{\"type\":\"DIALOG_START\",\"ts\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()},\"confidence\":{e.Probability:F3}}}");
-        };
-        deb.DialogEnd += (_, e) =>
-        {
-            Console.WriteLine($"[{sw.Elapsed:mm\\:ss\\.f}] <<< UNDUCK (dialog end)");
-            ws?.Broadcast($"{{\"type\":\"DIALOG_END\",\"ts\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}}}");
-        };
+        deb.DialogStart += (_, e) => Console.WriteLine($"[{sw.Elapsed:mm\\:ss\\.f}] >>> DUCK   (dialog start, p={e.Probability:F2})");
+        deb.DialogEnd += (_, e) => Console.WriteLine($"[{sw.Elapsed:mm\\:ss\\.f}] <<< UNDUCK (dialog end)");
 
         using var capture = new ProcessLoopbackCapture(pid, mode);
         var chunker = new Mono16kChunker(capture.WaveFormat);
@@ -271,7 +250,6 @@ internal static class Program
         capture.Start();
         stop.Wait();
         capture.Stop();
-        ws?.Dispose();
         return 0;
     }
 
@@ -279,8 +257,6 @@ internal static class Program
     private static int CmdService(string[] args)
     {
         var s = EngineSettings.Load();
-        s.Port = IntOpt(args, "--port", s.Port);
-        if (Opt(args, "--token", null) != null) s.Token = Opt(args, "--token", s.Token);
         s.Threshold = (float)DblOpt(args, "--threshold", s.Threshold);
         s.Enabled = true;
 
@@ -298,7 +274,7 @@ internal static class Program
         using var engine = new DetectionEngine(model, s) { Log = m => Console.WriteLine($"[engine] {m}") };
         var sw = System.Diagnostics.Stopwatch.StartNew();
         engine.DuckChanged += on => Console.WriteLine($"[{sw.Elapsed:mm\\:ss\\.f}] {(on ? ">>> DUCK" : "<<< UNDUCK")}");
-        Console.WriteLine($"Service running. WS ws://127.0.0.1:{s.Port}/?token={s.Token}");
+        Console.WriteLine("Service running (native ducking — controls other apps via the Windows mixer / media controls).");
         Console.WriteLine($"Sources: {(s.Sources.Count == 0 ? "none - set via tray or --pids" : string.Join(", ", s.Sources.Select(x => $"{x.ProcessName}({x.Pid})")))}");
         Console.WriteLine($"Threshold {s.Threshold:F2}, attack {s.MinSpeechMs}ms, end buffer {s.EndBufferMs}ms");
         Console.WriteLine("Ctrl+C to stop.\n");
@@ -443,12 +419,10 @@ internal static class Program
               [--end-buffer-ms 2000] [--exclude]
       Live capture -> VAD -> debouncer; prints DUCK/UNDUCK as dialog comes and goes.
 
-  voxinator serve --pid <PID> [--port 8730] [--token changeme] [...]        (Spike 5)
-      Same as live, plus a local WebSocket server the browser extension connects to.
-
-  voxinator service [--pids 1234,5678] [--port 8730] [--token ...]          (Phase 1)
+  voxinator service [--pids 1234,5678] [--threshold 0.35]                   (Phase 1)
       Headless background engine using saved settings (%APPDATA%\Voxinator).
-      --pids overrides the monitored sources for this run (speech in ANY ducks media).
+      Ducks/pauses other apps natively. --pids overrides the monitored sources
+      for this run (speech in ANY ducks media).
 
   voxinator tray                                                            (Phase 1)
       System-tray app: pick one or more sources (game, Discord, ...), toggle, settings.");

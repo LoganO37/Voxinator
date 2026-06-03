@@ -11,11 +11,13 @@ public sealed class GameSource
     [JsonIgnore] public bool Auto { get; set; } // engine-detected source; transient, not persisted
 }
 
-/// <summary>How the browser extension reacts on a given site: "pause" (hard cut) or "duck" (fade).</summary>
-public sealed class SiteRule
+/// <summary>Per-app override of the global action, keyed by process name. Action is "duck" (lower
+/// the volume, then fade back), "pause" (stop playback via the app's media controls), or "ignore"
+/// (never touch this app — e.g. voice chat).</summary>
+public sealed class AppRule
 {
-    public string Host { get; set; }
-    public string Action { get; set; } = "pause"; // "pause" | "duck"
+    public string Name { get; set; }             // process name, e.g. "spotify" (with or without .exe)
+    public string Action { get; set; } = "duck"; // "duck" | "pause" | "ignore"
 }
 
 /// <summary>
@@ -24,46 +26,28 @@ public sealed class SiteRule
 /// </summary>
 public sealed class EngineSettings
 {
-    public int Port { get; set; } = 8730;
-    public string Token { get; set; } = "changeme";
     public float Threshold { get; set; } = 0.35f;
     public int MinSpeechMs { get; set; } = 1;
     public int EndBufferMs { get; set; } = 2000;
     public bool Enabled { get; set; } = true;
     public bool AutoDetectGames { get; set; } = true;
-    /// <summary>Set once the first-run "Get Extension" wizard has been shown.</summary>
-    public bool ExtensionWizardSeen { get; set; } = false;
 
     /// <summary>Processes monitored for speech. Speech in ANY of them ducks media
     /// (e.g. a game's dialog AND a Discord call).</summary>
     public List<GameSource> Sources { get; set; } = new();
 
-    // ---- Browser behavior (pushed to the extension over the WebSocket as a CONFIG message) ----
-    /// <summary>Action for sites without a specific rule: "pause" or "duck".</summary>
-    public string DefaultAction { get; set; } = "pause";
+    // ---- Ducking behavior (how other apps react to detected dialog) ----
+    /// <summary>Global action for any audio app without its own rule: "duck" or "pause". The
+    /// monitored game(s) and Voxinator itself are always left alone.</summary>
+    public string DefaultAction { get; set; } = "duck";
     /// <summary>Target volume (0..1) when ducking.</summary>
     public float DuckVolume { get; set; } = 0.2f;
     /// <summary>Fade-back-in duration in ms when restoring after a duck. The duck-down is always
     /// instant; this only controls how gradually volume returns once dialog ends (0 = instant).</summary>
     public int RampMs { get; set; } = 300;
-    /// <summary>Per-site overrides. The most specific (longest) matching host wins in the extension.</summary>
-    public List<SiteRule> Sites { get; set; } = DefaultSites();
-
-    /// <summary>Native ducking model ("all apps except these"): process names (with or without
-    /// .exe) that are never ducked/paused even though they aren't the monitored game — e.g. voice
-    /// chat. The monitored game(s) and Voxinator itself are always excluded automatically.</summary>
-    public List<string> IgnoredApps { get; set; } = new();
-
-    // Only sites we've actually verified ship as defaults. Users can add others (Spotify,
-    // Bandcamp, etc.) themselves in the Websites tab — the extension supports more than this.
-    private static List<SiteRule> DefaultSites() => new()
-    {
-        new() { Host = "youtube.com",       Action = "pause" },
-        new() { Host = "music.youtube.com", Action = "duck" },
-        new() { Host = "music.amazon.com",  Action = "duck" },
-        new() { Host = "soundcloud.com",    Action = "duck" },
-        new() { Host = "audible.com",       Action = "pause" },
-    };
+    /// <summary>Per-app overrides of the global action, keyed by process name. "ignore" spares an
+    /// app entirely (e.g. voice chat).</summary>
+    public List<AppRule> Apps { get; set; } = new();
 
     // Legacy single-source fields (pre multi-source); migrated to Sources on load.
     public uint? GamePid { get; set; }
@@ -91,8 +75,7 @@ public sealed class EngineSettings
     private void Migrate()
     {
         Sources ??= new();
-        Sites ??= DefaultSites();
-        IgnoredApps ??= new();
+        Apps ??= new();
         if (Sources.Count == 0 && !string.IsNullOrEmpty(GameProcessName))
             Sources.Add(new GameSource { ProcessName = GameProcessName, Pid = GamePid });
         GamePid = null;
@@ -109,8 +92,7 @@ public sealed class EngineSettings
     {
         var c = (EngineSettings)MemberwiseClone();
         c.Sources = Sources.Select(x => new GameSource { ProcessName = x.ProcessName, Pid = x.Pid }).ToList();
-        c.Sites = Sites.Select(x => new SiteRule { Host = x.Host, Action = x.Action }).ToList();
-        c.IgnoredApps = IgnoredApps?.ToList() ?? new();
+        c.Apps = Apps.Select(x => new AppRule { Name = x.Name, Action = x.Action }).ToList();
         return c;
     }
 }
