@@ -40,6 +40,9 @@ public sealed class DetectionEngine : IDisposable
     private readonly string _modelPath;
     private readonly object _lock = new();
     private readonly List<SourceMonitor> _monitors = new();
+    // Pids whose app is open but not rendering audio yet (e.g. Discord with nobody talking). We
+    // retry their capture every watchdog tick but only log the wait once, to avoid spamming.
+    private readonly HashSet<uint> _awaitingAudio = new();
     private readonly System.Threading.Timer _watchdog;
     private EngineSettings _settings;
     private readonly GameLibrary _library;
@@ -327,6 +330,10 @@ public sealed class DetectionEngine : IDisposable
             if (!wanted.Contains(m.Pid) || !IsAlive(m.Pid)) { m.Dispose(); _monitors.RemoveAt(i); }
         }
 
+        // Forget "waiting for audio" pids that are no longer wanted (app closed / source removed),
+        // so if they come back and stall again we log the wait afresh.
+        _awaitingAudio.RemoveWhere(pid => !wanted.Contains(pid));
+
         // Start a monitor for any wanted source not already capturing. On failure, don't keep
         // a dead monitor — the next watchdog tick retries.
         foreach (var src in sources)
@@ -335,6 +342,13 @@ public sealed class DetectionEngine : IDisposable
             if (_monitors.Any(m => m.Pid == pid)) continue;
             var mon = new SourceMonitor { ProcessName = src.ProcessName ?? "", Pid = pid };
             try { StartMonitor(mon, pid); _monitors.Add(mon); }
+            catch (ProcessNotRenderingException)
+            {
+                // App is open but silent (very common for voice chat like Discord). Expected —
+                // log once and keep retrying quietly until it plays audio.
+                if (_awaitingAudio.Add(pid)) Log?.Invoke($"waiting for {mon.ProcessName} to play audio (pid {pid})");
+                mon.Dispose();
+            }
             catch (Exception ex) { Log?.Invoke($"capture failed for {mon.ProcessName} (pid {pid}): {ex.Message}; will retry"); mon.Dispose(); }
         }
 
@@ -367,7 +381,8 @@ public sealed class DetectionEngine : IDisposable
         mon.Capture.DataAvailable += (_, e) => mon.Chunker.Add(e.Buffer, e.BytesRecorded);
         mon.Capture.Start();
         mon.Capturing = true;
-        Log?.Invoke($"capturing {mon.ProcessName} (pid {pid})");
+        bool wasWaiting = _awaitingAudio.Remove(pid);
+        Log?.Invoke($"{(wasWaiting ? "now " : "")}capturing {mon.ProcessName} (pid {pid})");
     }
 
     private void RecomputeDuck() { lock (_lock) RecomputeDuckLocked(); }

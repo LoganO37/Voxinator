@@ -29,6 +29,10 @@ public sealed class ProcessLoopbackCapture : IDisposable
         cbSize = 0,
     };
 
+    // HRESULTs returned by IAudioClient.Initialize on the process-loopback device.
+    private const int E_UNEXPECTED = unchecked((int)0x8000FFFF);             // target not rendering yet
+    private const int AUDCLNT_E_UNSUPPORTED_FORMAT = unchecked((int)0x88890008);
+
     public WaveFormat WaveFormat { get; } = new WaveFormat(48000, 16, 2);
     public event EventHandler<WaveInEventArgs> DataAvailable;
 
@@ -110,10 +114,20 @@ public sealed class ProcessLoopbackCapture : IDisposable
                 AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
                 hns100ms, 0, ref fmt, IntPtr.Zero);
             if (hr != 0)
+            {
+                if (hr == E_UNEXPECTED)
+                    // The process-loopback device returns E_UNEXPECTED from Initialize when the
+                    // target process has no active render stream yet — e.g. Discord is open but
+                    // nobody is talking. Nothing to fix here; the caller retries until the app
+                    // actually plays audio, at which point the same format initializes fine.
+                    throw new ProcessNotRenderingException(_pid);
+
+                string hint = hr == AUDCLNT_E_UNSUPPORTED_FORMAT
+                    ? " — the loopback device rejected 16-bit PCM 48k stereo on this system"
+                    : "";
                 throw new InvalidOperationException(
-                    $"IAudioClient.Initialize failed (0x{hr:X8}). " +
-                    "If this is AUDCLNT_E_UNSUPPORTED_FORMAT (0x88890008), the loopback device " +
-                    "rejected 16-bit PCM 48k stereo on this system.", Marshal.GetExceptionForHR(hr));
+                    $"IAudioClient.Initialize failed (0x{hr:X8}){hint}.", Marshal.GetExceptionForHR(hr));
+            }
 
             hEvent = NativeMethods.CreateEventEx(IntPtr.Zero, IntPtr.Zero, 0, EVENT_ALL_ACCESS);
             if (hEvent == IntPtr.Zero) throw new Win32Exception();
@@ -173,4 +187,16 @@ public sealed class ProcessLoopbackCapture : IDisposable
             return 0; // S_OK
         }
     }
+}
+
+/// <summary>
+/// Thrown when process-loopback capture can't initialize because the target process has no active
+/// audio render stream yet (HRESULT E_UNEXPECTED) — e.g. the app is open but not playing anything.
+/// This is expected and transient: retry once the app produces audio. Kept distinct from real
+/// device/format failures so callers can treat "just waiting for audio" quietly.
+/// </summary>
+public sealed class ProcessNotRenderingException : Exception
+{
+    public ProcessNotRenderingException(uint pid)
+        : base($"Target process {pid} has no active audio stream yet; will retry when it plays audio.") { }
 }
