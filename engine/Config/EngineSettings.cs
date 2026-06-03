@@ -31,6 +31,10 @@ public sealed class EngineSettings
     public int EndBufferMs { get; set; } = 2000;
     public bool Enabled { get; set; } = true;
     public bool AutoDetectGames { get; set; } = true;
+    /// <summary>When on, common voice-chat / call apps (Discord, TeamSpeak, Zoom, …) are monitored
+    /// as dialog sources while running — so your media ducks when someone is talking, just like a
+    /// game's dialog. Independent of <see cref="AutoDetectGames"/>.</summary>
+    public bool DuckForVoiceChat { get; set; } = false;
 
     /// <summary>Processes monitored for speech. Speech in ANY of them ducks media
     /// (e.g. a game's dialog AND a Discord call).</summary>

@@ -23,22 +23,16 @@ if (inApp) {
 function mock(cmd) {
   const sources = [
     { name: "swtor", capturing: true, active: false, auto: true },
-    { name: "Discord", capturing: true, active: true, auto: false },
+    { name: "Discord", capturing: true, active: true, auto: true },
   ];
   if (cmd === "snapshot") return {
-    enabled: true, autoDetect: true, ducking: false, status: "Listening — swtor, Discord",
-    sources,
-    appVersion: "1.0.0", updateStaged: false, updateVersion: "", launchOnStartup: false,
+    enabled: true, autoDetect: true, voiceChat: true, ducking: false, status: "Listening — swtor, Discord",
+    sources, appVersion: "1.0.3", updateStaged: false, updateVersion: "", launchOnStartup: false,
+    defaultAction: "duck", duckVolume: 0.2, rampMs: 300,
     settings: { threshold: 0.35, minSpeechMs: 1, endBufferMs: 2000 },
   };
-  if (cmd === "games") return {
-    autoDetect: true, monitored: sources,
-    audioApps: [{ pid: 1, name: "firefox" }, { pid: 2, name: "spotify" }],
-    library: [
-      { process: "swtor", title: "Star Wars: The Old Republic", monitored: true },
-      { process: "cs2", title: "Counter-Strike 2", monitored: false },
-      { process: "eldenring", title: "Elden Ring", monitored: false },
-    ],
+  if (cmd === "sources") return {
+    running: [{ name: "firefox", title: "firefox" }, { name: "spotify", title: "spotify" }, { name: "Discord", title: "Discord" }],
   };
   if (cmd === "apps") return {
     defaultAction: "duck", duckVolume: 0.2, rampMs: 300,
@@ -62,12 +56,28 @@ document.querySelectorAll(".nav-item").forEach((b) =>
     document.querySelectorAll(".view").forEach((x) => x.classList.remove("active"));
     b.classList.add("active");
     $("view-" + b.dataset.view).classList.add("active");
-    if (b.dataset.view === "games") loadGames();
-    if (b.dataset.view === "apps") loadApps();
+    if (b.dataset.view === "settings") loadSettings();
   })
 );
 
-// ---- shared source rendering ----
+// ---- helpers ----
+function setSeg(container, action) {
+  container.querySelectorAll(".seg-btn").forEach((b) => b.classList.toggle("active", b.dataset.action === action));
+}
+// Set a range's value + label without clobbering it while the user is dragging.
+function setRange(id, valId, value, fmt) {
+  const el = $(id), out = $(valId);
+  if (document.activeElement !== el) el.value = value;
+  out.textContent = fmt(parseFloat(el.value));
+}
+// Bind a range's live label (used for detection sliders that only apply on Save).
+function bindRange(id, valId, value, fmt) {
+  const el = $(id), out = $(valId);
+  el.value = value;
+  const update = () => (out.textContent = fmt(parseFloat(el.value)));
+  el.oninput = update; update();
+}
+
 function renderSources(el, sources, autoDetect, withRemove) {
   if (sources && sources.length) {
     el.innerHTML = sources.map((x) => {
@@ -78,13 +88,13 @@ function renderSources(el, sources, autoDetect, withRemove) {
              `<span class="tag">${x.auto ? "auto" : "manual"} · ${state}</span>${rm}</div>`;
     }).join("");
     if (withRemove) el.querySelectorAll(".src-rm").forEach((b) =>
-      b.addEventListener("click", () => call("removeSource", { name: b.dataset.name }).then(loadGames)));
+      b.addEventListener("click", () => call("removeSource", { name: b.dataset.name }).then(loadSources)));
   } else {
-    el.innerHTML = `<div class="empty">Nothing monitored yet${autoDetect ? " — launch a game and it'll appear here." : "."}</div>`;
+    el.innerHTML = `<div class="empty">Nothing monitored yet${autoDetect ? " — launch a game or join a call and it'll appear here." : "."}</div>`;
   }
 }
 
-// ---- live state ----
+// ---- live state (dashboard + settings toggles) ----
 function applyState(s) {
   if (!s) return;
   const banner = $("statusBanner");
@@ -99,26 +109,55 @@ function applyState(s) {
   $("footState").textContent = !s.enabled ? "Disabled" : (s.ducking ? "Ducking" : (monitoring ? "Listening" : "Idle"));
 
   $("tglEnabled").checked = !!s.enabled;
-  $("tglAuto").checked = !!s.autoDetect;
-  $("gAuto").checked = !!s.autoDetect;
-
+  $("sAuto").checked = !!s.autoDetect;
+  $("sVoice").checked = !!s.voiceChat;
   $("tglStartup").checked = !!s.launchOnStartup;
+
+  // dashboard quick ducking controls
+  if (s.defaultAction) setSeg($("dDefault"), s.defaultAction);
+  if (typeof s.duckVolume === "number") setRange("dDuck", "vDDuck", Math.round(s.duckVolume * 100), (v) => v + "%");
+
   $("appVer").textContent = "Version " + (s.appVersion || "—");
   const uw = $("updWrap");
   if (s.updateStaged) { uw.style.display = ""; $("updTag").textContent = "Update ready" + (s.updateVersion ? " (v" + s.updateVersion + ")" : ""); }
   else uw.style.display = "none";
 
-  renderSources($("sourcesList"), s.sources, s.autoDetect, false);
-  renderSources($("gMonitored"), s.sources, s.autoDetect, true);
+  renderSources($("sourcesList"), s.sources, s.autoDetect, true);
 }
 
-// ---- settings ----
-function bindRange(id, valId, value, fmt) {
-  const el = $(id), out = $(valId);
-  el.value = value;
-  const update = () => (out.textContent = fmt(parseFloat(el.value)));
-  el.oninput = update; update();
+// ---- dashboard ducking controls ----
+$("tglEnabled").addEventListener("change", (e) => call("setEnabled", { on: e.target.checked }));
+$("dDefault").querySelectorAll(".seg-btn").forEach((b) =>
+  b.addEventListener("click", () => { setSeg($("dDefault"), b.dataset.action); call("setDefaultAction", { action: b.dataset.action }); }));
+$("dDuck").addEventListener("input", () => ($("vDDuck").textContent = $("dDuck").value + "%"));
+$("dDuck").addEventListener("change", () => call("setDuckVolume", { value: parseInt($("dDuck").value, 10) / 100 }));
+
+// ---- settings: sources ----
+async function loadSettings() { await Promise.all([loadSources(), loadApps()]); }
+
+async function loadSources() {
+  const r = await call("sources");
+  renderRunning((r && r.running) || []);
 }
+function renderRunning(running) {
+  const el = $("sRunning");
+  if (running && running.length) {
+    el.innerHTML = running.map((a) => `<button class="chip" data-name="${esc(a.name)}" title="${esc(a.name)}">+ ${esc(a.title || a.name)}</button>`).join("");
+    el.querySelectorAll(".chip").forEach((b) =>
+      b.addEventListener("click", () => call("addSource", { name: b.dataset.name }).then((r) => { renderRunning((r && r.running) || []); })));
+  } else {
+    el.innerHTML = `<div class="empty">Nothing running to add right now.</div>`;
+  }
+}
+$("sAuto").addEventListener("change", (e) => call("setAutoDetect", { on: e.target.checked }).then(loadSources));
+$("sVoice").addEventListener("change", (e) => call("setVoiceChat", { on: e.target.checked }).then(loadSources));
+$("sAddBtn").addEventListener("click", () => {
+  const v = $("sAddName").value.trim().replace(/\.exe$/i, "");
+  if (v) call("addSource", { name: v }).then(() => { $("sAddName").value = ""; loadSources(); });
+});
+$("sAddName").addEventListener("keydown", (e) => { if (e.key === "Enter") $("sAddBtn").click(); });
+
+// ---- settings: detection ----
 function fillSettings(st) {
   bindRange("setThreshold", "vThreshold", st.threshold, (v) => v.toFixed(2));
   bindRange("setAttack", "vAttack", st.minSpeechMs, (v) => v + " ms");
@@ -133,67 +172,15 @@ $("btnSaveSettings").addEventListener("click", async () => {
   const m = $("savedMsg"); m.classList.add("show"); setTimeout(() => m.classList.remove("show"), 1500);
 });
 
-// ---- dashboard toggles ----
-$("tglEnabled").addEventListener("change", (e) => call("setEnabled", { on: e.target.checked }));
-$("tglAuto").addEventListener("change", (e) => call("setAutoDetect", { on: e.target.checked }));
-
-// ---- general (startup + update) ----
-$("tglStartup").addEventListener("change", (e) => call("setStartup", { on: e.target.checked }));
-$("btnRestart").addEventListener("click", () => call("restartToUpdate"));
-
-// ---- games screen ----
-let GAMES_LIB = [];
-async function loadGames() {
-  const g = await call("games");
-  $("gAuto").checked = !!g.autoDetect;
-  renderSources($("gMonitored"), g.monitored, g.autoDetect, true);
-  renderAudioApps(g.audioApps, g.monitored);
-  GAMES_LIB = g.library || [];
-  $("gLibCount").textContent = "(" + GAMES_LIB.length + ")";
-  renderLibrary($("gSearch").value);
-}
-function renderAudioApps(apps, monitored) {
-  const mon = new Set((monitored || []).map((m) => m.name.toLowerCase()));
-  const avail = (apps || []).filter((a) => !mon.has(a.name.toLowerCase()));
-  const el = $("gApps");
-  if (avail.length) {
-    el.innerHTML = avail.map((a) => `<button class="chip" data-pid="${a.pid}" data-name="${esc(a.name)}">+ ${esc(a.name)}</button>`).join("");
-    el.querySelectorAll(".chip").forEach((b) =>
-      b.addEventListener("click", () => call("addSource", { pid: parseInt(b.dataset.pid, 10), name: b.dataset.name }).then(loadGames)));
-  } else {
-    el.innerHTML = `<div class="empty">No other apps playing audio right now.</div>`;
-  }
-}
-function renderLibrary(q) {
-  q = (q || "").toLowerCase().trim();
-  const items = GAMES_LIB.filter((g) => !q || g.title.toLowerCase().includes(q) || g.process.toLowerCase().includes(q));
-  $("gLibList").innerHTML = items.length
-    ? items.slice(0, 400).map((g) => `<div class="libitem"><span class="lt">${esc(g.title)}</span>` +
-        `<span class="lp">${esc(g.process)}</span>${g.monitored ? '<span class="badge">monitored</span>' : ""}</div>`).join("")
-    : `<div class="empty" style="padding:14px">No matches.</div>`;
-}
-$("gAuto").addEventListener("change", (e) => call("setAutoDetect", { on: e.target.checked }).then(loadGames));
-$("gAddBtn").addEventListener("click", () => {
-  const v = $("gAddName").value.trim();
-  if (v) call("addSource", { name: v }).then(() => { $("gAddName").value = ""; loadGames(); });
-});
-$("gAddName").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gAddBtn").click(); });
-$("gSearch").addEventListener("input", () => renderLibrary($("gSearch").value));
-
-// ---- apps screen ----
-function setSeg(container, action) {
-  container.querySelectorAll(".seg-btn").forEach((b) => b.classList.toggle("active", b.dataset.action === action));
-}
+// ---- settings: ducking behavior (fade + per-app rules) ----
 async function loadApps() {
   const w = await call("apps");
-  setSeg($("aDefault"), w.defaultAction || "duck");
-  bindRange("aDuck", "vDuck", Math.round((w.duckVolume ?? 0.2) * 100), (v) => v + "%");
-  bindRange("aRamp", "vRamp", w.rampMs ?? 300, (v) => (v === 0 ? "instant" : v + " ms"));
-  renderPlaying(w.playing || []);
-  renderRules(w.apps || []);
+  setRange("sRamp", "vRamp", w.rampMs ?? 300, (v) => (v === 0 ? "instant" : v + " ms"));
+  renderPlaying((w && w.playing) || []);
+  renderRules((w && w.apps) || []);
 }
 function renderPlaying(playing) {
-  const el = $("aPlaying");
+  const el = $("rulePlaying");
   if (playing && playing.length) {
     el.innerHTML = playing.map((n) => `<button class="chip" data-name="${esc(n)}">+ ${esc(n)}</button>`).join("");
     el.querySelectorAll(".chip").forEach((b) =>
@@ -205,7 +192,7 @@ function renderPlaying(playing) {
 const ruleSeg = (act, cur) =>
   `<button class="seg-btn${cur === act ? " active" : ""}" data-action="${act}">${act === "duck" ? "Duck" : act === "pause" ? "Pause" : "Ignore"}</button>`;
 function renderRules(apps) {
-  const el = $("aRules");
+  const el = $("ruleList");
   if (!apps.length) { el.innerHTML = `<div class="empty">No per-app rules — the default applies to everything.</div>`; return; }
   el.innerHTML = apps.map((a) =>
     `<div class="siterow"><span class="host">${esc(a.name)}</span>` +
@@ -216,15 +203,17 @@ function renderRules(apps) {
   el.querySelectorAll(".src-rm").forEach((b) =>
     b.addEventListener("click", () => call("removeApp", { name: b.dataset.name }).then(loadApps)));
 }
-$("aDefault").querySelectorAll(".seg-btn").forEach((b) =>
-  b.addEventListener("click", () => { setSeg($("aDefault"), b.dataset.action); call("setDefaultAction", { action: b.dataset.action }); }));
-$("aDuck").addEventListener("change", () => call("setDuckVolume", { value: parseInt($("aDuck").value, 10) / 100 }));
-$("aRamp").addEventListener("change", () => call("setRampMs", { value: parseInt($("aRamp").value, 10) }));
-$("aAddBtn").addEventListener("click", () => {
-  const v = $("aAddName").value.trim().replace(/\.exe$/i, "");
-  if (v) call("setApp", { name: v, action: "duck" }).then(() => { $("aAddName").value = ""; loadApps(); });
+$("sRamp").addEventListener("input", () => ($("vRamp").textContent = $("sRamp").value === "0" ? "instant" : $("sRamp").value + " ms"));
+$("sRamp").addEventListener("change", () => call("setRampMs", { value: parseInt($("sRamp").value, 10) }));
+$("ruleAddBtn").addEventListener("click", () => {
+  const v = $("ruleAddName").value.trim().replace(/\.exe$/i, "");
+  if (v) call("setApp", { name: v, action: "duck" }).then(() => { $("ruleAddName").value = ""; loadApps(); });
 });
-$("aAddName").addEventListener("keydown", (e) => { if (e.key === "Enter") $("aAddBtn").click(); });
+$("ruleAddName").addEventListener("keydown", (e) => { if (e.key === "Enter") $("ruleAddBtn").click(); });
+
+// ---- settings: startup + update ----
+$("tglStartup").addEventListener("change", (e) => call("setStartup", { on: e.target.checked }));
+$("btnRestart").addEventListener("click", () => call("restartToUpdate"));
 
 // ---- init ----
 (async () => {

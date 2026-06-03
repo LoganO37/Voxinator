@@ -138,6 +138,17 @@ public sealed class DetectionEngine : IDisposable
 
     public void SetAutoDetect(bool on) { lock (_lock) { _settings.AutoDetectGames = on; RefreshAutoSourcesLocked(); RestartCaptureLocked(); } }
 
+    public void SetVoiceChat(bool on) { lock (_lock) { _settings.DuckForVoiceChat = on; RefreshAutoSourcesLocked(); RestartCaptureLocked(); } }
+
+    /// <summary>Running known apps (library games + voice apps) — surfaced in the UI as quick-add
+    /// sources so they appear even when silent (the "currently running" list).</summary>
+    public IReadOnlyList<(string name, string title)> RunningKnownApps()
+    {
+        var list = _library.FindRunningGames().Select(g => (g.name, g.title)).ToList();
+        list.AddRange(VoiceApps.FindRunning().Select(v => (v.name, v.title)));
+        return list;
+    }
+
     public int GameLibrarySize => _library.Count;
 
     public IReadOnlyList<(string process, string title)> LibraryGames()
@@ -227,16 +238,18 @@ public sealed class DetectionEngine : IDisposable
             if (!_settings.Sources.Any(m => NameEq(m.ProcessName, a.ProcessName))) yield return a;
     }
 
-    // Auto-detect: add running known games (from games.json) as sources; drop ones that closed
-    // or that the user has since added manually. Called each watchdog tick.
+    // Auto-detect: add running known games (and, when enabled, voice apps) as sources; drop ones
+    // that closed or that the user has since added manually. Called each watchdog tick.
     private void RefreshAutoSourcesLocked()
     {
-        if (!_settings.Enabled || !_settings.AutoDetectGames)
+        if (!_settings.Enabled || (!_settings.AutoDetectGames && !_settings.DuckForVoiceChat))
         {
             if (_autoSources.Count > 0) _autoSources.Clear();
             return;
         }
-        var detected = _library.FindRunningGames();
+        var detected = new List<(uint pid, string name, string title)>();
+        if (_settings.AutoDetectGames) detected.AddRange(_library.FindRunningGames());
+        if (_settings.DuckForVoiceChat) detected.AddRange(VoiceApps.FindRunning());
         _autoSources.RemoveAll(a =>
             !detected.Any(d => NameEq(d.name, a.ProcessName)) ||
             _settings.Sources.Any(m => NameEq(m.ProcessName, a.ProcessName)));
@@ -248,7 +261,7 @@ public sealed class DetectionEngine : IDisposable
             else
             {
                 _autoSources.Add(new GameSource { ProcessName = d.name, Pid = d.pid, Auto = true });
-                Log?.Invoke($"auto-detected game: {d.title} ({d.name}, pid {d.pid})");
+                Log?.Invoke($"auto-detected source: {d.title} ({d.name}, pid {d.pid})");
             }
         }
     }

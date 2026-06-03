@@ -94,12 +94,13 @@ public sealed class MainWindow : Form
         switch (cmd)
         {
             case "snapshot": return Snapshot();
-            case "games": return GamesInfo();
+            case "sources": return SourcesInfo();
             case "setEnabled": _engine.SetEnabled(args.GetProperty("on").GetBoolean()); Persist(); return Snapshot();
             case "setAutoDetect": _engine.SetAutoDetect(args.GetProperty("on").GetBoolean()); Persist(); return Snapshot();
+            case "setVoiceChat": _engine.SetVoiceChat(args.GetProperty("on").GetBoolean()); Persist(); return Snapshot();
             case "saveSettings": return SaveSettings(args);
-            case "addSource": AddSourceCmd(args); Persist(); return GamesInfo();
-            case "removeSource": _engine.RemoveSource(args.GetProperty("name").GetString()); Persist(); return GamesInfo();
+            case "addSource": AddSourceCmd(args); Persist(); return SourcesInfo();
+            case "removeSource": _engine.RemoveSource(args.GetProperty("name").GetString()); Persist(); return SourcesInfo();
             case "apps": return AppsInfo();
             case "setDefaultAction": _engine.SetDefaultAction(args.GetProperty("action").GetString()); return AppsInfo();
             case "setDuckVolume": _engine.SetDuckVolume((float)args.GetProperty("value").GetDouble()); return AppsInfo();
@@ -124,17 +125,26 @@ public sealed class MainWindow : Form
             _engine.AddSourceByName(name);
     }
 
-    private object GamesInfo()
+    // Apps you can add as a source right now: anything currently producing audio, plus running
+    // known games and voice apps (so they appear even when silent). The full game library is NOT
+    // listed — only what's actually running. Excludes already-monitored sources and Voxinator.
+    private object SourcesInfo()
     {
-        var monitored = _engine.SourceStates()
-            .Select(x => new { name = x.name, capturing = x.capturing, active = x.active, auto = _engine.IsAutoSource(x.name) })
+        var monitored = new HashSet<string>(_engine.SourceStates().Select(x => x.name), StringComparer.OrdinalIgnoreCase);
+        var candidates = new List<(string name, string title)>();
+        foreach (var a in ProcessList.AudioSessions()) candidates.Add((a.ProcessName, a.ProcessName));
+        foreach (var k in _engine.RunningKnownApps()) candidates.Add((k.name, k.title));
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var running = candidates
+            .Where(c => !string.IsNullOrWhiteSpace(c.name)
+                        && !monitored.Contains(c.name)
+                        && !string.Equals(c.name, "voxinator", StringComparison.OrdinalIgnoreCase)
+                        && seen.Add(c.name))
+            .OrderBy(c => c.title, StringComparer.OrdinalIgnoreCase)
+            .Select(c => new { name = c.name, title = c.title })
             .ToList();
-        var monitoredNames = new HashSet<string>(monitored.Select(m => m.name), StringComparer.OrdinalIgnoreCase);
-        var audioApps = ProcessList.AudioSessions().Select(a => new { pid = a.Pid, name = a.ProcessName }).ToList();
-        var library = _engine.LibraryGames()
-            .Select(g => new { process = g.process, title = g.title, monitored = monitoredNames.Contains(g.process) })
-            .ToList();
-        return new { autoDetect = _engine.Settings.AutoDetectGames, monitored, audioApps, library };
+        return new { running };
     }
 
     private object AppsInfo()
@@ -203,6 +213,7 @@ public sealed class MainWindow : Form
         {
             enabled = s.Enabled,
             autoDetect = s.AutoDetectGames,
+            voiceChat = s.DuckForVoiceChat,
             ducking = _engine.Ducking,
             status = _engine.StatusSummary(),
             appVersion = _updater?.CurrentVersion ?? "",
@@ -210,6 +221,9 @@ public sealed class MainWindow : Form
             updateVersion = _updater?.StagedVersion ?? "",
             launchOnStartup = AutoStart.IsEnabled(),
             sources,
+            defaultAction = s.DefaultAction,
+            duckVolume = s.DuckVolume,
+            rampMs = s.RampMs,
             settings = new { threshold = s.Threshold, minSpeechMs = s.MinSpeechMs, endBufferMs = s.EndBufferMs },
         };
     }
