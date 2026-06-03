@@ -83,7 +83,7 @@ function renderSources(el, sources, autoDetect, withRemove) {
     el.innerHTML = sources.map((x) => {
       const cls = x.active ? "duck" : (x.capturing ? "cap" : "");
       const state = x.active ? "speaking" : (x.capturing ? "listening" : "waiting");
-      const rm = withRemove && !x.auto ? `<button class="src-rm" data-name="${esc(x.name)}" title="Remove">✕</button>` : "";
+      const rm = withRemove ? `<button class="src-rm" data-name="${esc(x.name)}" title="Stop monitoring">✕</button>` : "";
       return `<div class="source"><span class="dot ${cls}"></span><span class="nm">${esc(x.name)}</span>` +
              `<span class="tag">${x.auto ? "auto" : "manual"} · ${state}</span>${rm}</div>`;
     }).join("");

@@ -116,6 +116,7 @@ public sealed class DetectionEngine : IDisposable
         lock (_lock)
         {
             name ??= "";
+            _settings.ExcludedSources.RemoveAll(x => NameEq(x, name)); // re-adding clears any exclusion
             var existing = _settings.Sources.FirstOrDefault(x => NameEq(x.ProcessName, name));
             if (existing != null) existing.Pid = pid;
             else _settings.Sources.Add(new GameSource { ProcessName = name, Pid = pid });
@@ -126,9 +127,14 @@ public sealed class DetectionEngine : IDisposable
 
     public void RemoveSource(string name)
     {
+        if (string.IsNullOrWhiteSpace(name)) return;
         lock (_lock)
         {
+            name = name.Trim();
             _settings.Sources.RemoveAll(x => NameEq(x.ProcessName, name));
+            _autoSources.RemoveAll(a => NameEq(a.ProcessName, name));
+            // Exclude so auto-detect (games or voice chat) won't re-add it on the next tick.
+            if (!_settings.ExcludedSources.Any(x => NameEq(x, name))) _settings.ExcludedSources.Add(name);
             RestartCaptureLocked();
         }
     }
@@ -181,6 +187,7 @@ public sealed class DetectionEngine : IDisposable
         lock (_lock)
         {
             name = name.Trim();
+            _settings.ExcludedSources.RemoveAll(x => NameEq(x, name)); // re-adding clears any exclusion
             if (!_settings.Sources.Any(x => NameEq(x.ProcessName, name)))
                 _settings.Sources.Add(new GameSource { ProcessName = name, Pid = null });
             RecordRecentLocked(name, TitleFor(name));
@@ -272,6 +279,8 @@ public sealed class DetectionEngine : IDisposable
         var detected = new List<(uint pid, string name, string title)>();
         if (_settings.AutoDetectGames) detected.AddRange(_library.FindRunningGames());
         if (_settings.DuckForVoiceChat) detected.AddRange(VoiceApps.FindRunning());
+        if (_settings.ExcludedSources.Count > 0)
+            detected.RemoveAll(d => _settings.ExcludedSources.Any(x => NameEq(x, d.name))); // user stopped these
         _autoSources.RemoveAll(a =>
             !detected.Any(d => NameEq(d.name, a.ProcessName)) ||
             _settings.Sources.Any(m => NameEq(m.ProcessName, a.ProcessName)));

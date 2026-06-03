@@ -52,6 +52,10 @@ public sealed class EngineSettings
     /// "used before" quick-add list. Capped; titles cached for display.</summary>
     public List<RecentSource> RecentSources { get; set; } = new();
 
+    /// <summary>Process names the user has explicitly stopped monitoring, so auto-detect (games or
+    /// voice chat) won't immediately re-add them. Cleared for a name when it's added back.</summary>
+    public List<string> ExcludedSources { get; set; } = new();
+
     // ---- Ducking behavior (how other apps react to detected dialog) ----
     /// <summary>Global action for any audio app without its own rule: "duck" or "pause". The
     /// monitored game(s) and Voxinator itself are always left alone.</summary>
@@ -93,6 +97,7 @@ public sealed class EngineSettings
         Sources ??= new();
         Apps ??= new();
         RecentSources ??= new();
+        ExcludedSources ??= new();
         if (Sources.Count == 0 && !string.IsNullOrEmpty(GameProcessName))
             Sources.Add(new GameSource { ProcessName = GameProcessName, Pid = GamePid });
         GamePid = null;
@@ -111,6 +116,7 @@ public sealed class EngineSettings
         c.Sources = Sources.Select(x => new GameSource { ProcessName = x.ProcessName, Pid = x.Pid }).ToList();
         c.Apps = Apps.Select(x => new AppRule { Name = x.Name, Action = x.Action }).ToList();
         c.RecentSources = RecentSources.Select(x => new RecentSource { Name = x.Name, Title = x.Title }).ToList();
+        c.ExcludedSources = ExcludedSources?.ToList() ?? new();
         return c;
     }
 }
