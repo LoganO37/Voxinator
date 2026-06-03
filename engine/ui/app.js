@@ -27,12 +27,12 @@ function mock(cmd) {
   ];
   if (cmd === "snapshot") return {
     enabled: true, autoDetect: true, voiceChat: true, ducking: false, status: "Listening — swtor, Discord",
-    sources, appVersion: "1.0.3", updateStaged: false, updateVersion: "", launchOnStartup: false,
+    sources,
+    running: [{ name: "cs2", title: "Counter-Strike 2" }, { name: "firefox", title: "firefox" }, { name: "spotify", title: "spotify" }],
+    recent: [{ name: "eldenring", title: "Elden Ring" }, { name: "Zoom", title: "Zoom" }],
+    appVersion: "1.0.3", updateStaged: false, updateVersion: "", launchOnStartup: false,
     defaultAction: "duck", duckVolume: 0.2, rampMs: 300,
     settings: { threshold: 0.35, minSpeechMs: 1, endBufferMs: 2000 },
-  };
-  if (cmd === "sources") return {
-    running: [{ name: "firefox", title: "firefox" }, { name: "spotify", title: "spotify" }, { name: "Discord", title: "Discord" }],
   };
   if (cmd === "apps") return {
     defaultAction: "duck", duckVolume: 0.2, rampMs: 300,
@@ -56,7 +56,7 @@ document.querySelectorAll(".nav-item").forEach((b) =>
     document.querySelectorAll(".view").forEach((x) => x.classList.remove("active"));
     b.classList.add("active");
     $("view-" + b.dataset.view).classList.add("active");
-    if (b.dataset.view === "settings") loadSettings();
+    if (b.dataset.view === "settings") loadApps();
   })
 );
 
@@ -88,13 +88,23 @@ function renderSources(el, sources, autoDetect, withRemove) {
              `<span class="tag">${x.auto ? "auto" : "manual"} · ${state}</span>${rm}</div>`;
     }).join("");
     if (withRemove) el.querySelectorAll(".src-rm").forEach((b) =>
-      b.addEventListener("click", () => call("removeSource", { name: b.dataset.name }).then(loadSources)));
+      b.addEventListener("click", () => call("removeSource", { name: b.dataset.name }).then(applyState)));
   } else {
     el.innerHTML = `<div class="empty">Nothing monitored yet${autoDetect ? " — launch a game or join a call and it'll appear here." : "."}</div>`;
   }
 }
+// Quick-add chips for sources (playing now / used before). Clicking monitors that app.
+function renderSourceChips(el, items, emptyMsg) {
+  if (items && items.length) {
+    el.innerHTML = items.map((a) => `<button class="chip" data-name="${esc(a.name)}" title="${esc(a.name)}">+ ${esc(a.title || a.name)}</button>`).join("");
+    el.querySelectorAll(".chip").forEach((b) =>
+      b.addEventListener("click", () => call("addSource", { name: b.dataset.name }).then(applyState)));
+  } else {
+    el.innerHTML = `<div class="empty">${esc(emptyMsg)}</div>`;
+  }
+}
 
-// ---- live state (dashboard + settings toggles) ----
+// ---- live state (drives the whole dashboard + settings toggles) ----
 function applyState(s) {
   if (!s) return;
   const banner = $("statusBanner");
@@ -123,37 +133,23 @@ function applyState(s) {
   else uw.style.display = "none";
 
   renderSources($("sourcesList"), s.sources, s.autoDetect, true);
+  renderSourceChips($("sRunning"), s.running || [], "Nothing running to add right now.");
+  renderSourceChips($("sRecent"), s.recent || [], "Sources you've monitored will show up here.");
 }
 
-// ---- dashboard ducking controls ----
-$("tglEnabled").addEventListener("change", (e) => call("setEnabled", { on: e.target.checked }));
+// ---- dashboard: ducking controls ----
+$("tglEnabled").addEventListener("change", (e) => call("setEnabled", { on: e.target.checked }).then(applyState));
 $("dDefault").querySelectorAll(".seg-btn").forEach((b) =>
   b.addEventListener("click", () => { setSeg($("dDefault"), b.dataset.action); call("setDefaultAction", { action: b.dataset.action }); }));
 $("dDuck").addEventListener("input", () => ($("vDDuck").textContent = $("dDuck").value + "%"));
 $("dDuck").addEventListener("change", () => call("setDuckVolume", { value: parseInt($("dDuck").value, 10) / 100 }));
 
-// ---- settings: sources ----
-async function loadSettings() { await Promise.all([loadSources(), loadApps()]); }
-
-async function loadSources() {
-  const r = await call("sources");
-  renderRunning((r && r.running) || []);
-}
-function renderRunning(running) {
-  const el = $("sRunning");
-  if (running && running.length) {
-    el.innerHTML = running.map((a) => `<button class="chip" data-name="${esc(a.name)}" title="${esc(a.name)}">+ ${esc(a.title || a.name)}</button>`).join("");
-    el.querySelectorAll(".chip").forEach((b) =>
-      b.addEventListener("click", () => call("addSource", { name: b.dataset.name }).then((r) => { renderRunning((r && r.running) || []); })));
-  } else {
-    el.innerHTML = `<div class="empty">Nothing running to add right now.</div>`;
-  }
-}
-$("sAuto").addEventListener("change", (e) => call("setAutoDetect", { on: e.target.checked }).then(loadSources));
-$("sVoice").addEventListener("change", (e) => call("setVoiceChat", { on: e.target.checked }).then(loadSources));
+// ---- dashboard: sources ----
+$("sAuto").addEventListener("change", (e) => call("setAutoDetect", { on: e.target.checked }).then(applyState));
+$("sVoice").addEventListener("change", (e) => call("setVoiceChat", { on: e.target.checked }).then(applyState));
 $("sAddBtn").addEventListener("click", () => {
   const v = $("sAddName").value.trim().replace(/\.exe$/i, "");
-  if (v) call("addSource", { name: v }).then(() => { $("sAddName").value = ""; loadSources(); });
+  if (v) call("addSource", { name: v }).then((snap) => { $("sAddName").value = ""; applyState(snap); });
 });
 $("sAddName").addEventListener("keydown", (e) => { if (e.key === "Enter") $("sAddBtn").click(); });
 

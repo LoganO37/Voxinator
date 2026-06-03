@@ -119,6 +119,7 @@ public sealed class DetectionEngine : IDisposable
             var existing = _settings.Sources.FirstOrDefault(x => NameEq(x.ProcessName, name));
             if (existing != null) existing.Pid = pid;
             else _settings.Sources.Add(new GameSource { ProcessName = name, Pid = pid });
+            RecordRecentLocked(name, TitleFor(name));
             RestartCaptureLocked();
         }
     }
@@ -149,6 +150,26 @@ public sealed class DetectionEngine : IDisposable
         return list;
     }
 
+    // Friendly title for a process name (known game or voice app), else the name itself.
+    private string TitleFor(string name)
+    {
+        if (_library.TryGetTitle(name, out var t)) return t;
+        if (VoiceApps.Known.TryGetValue(name, out var v)) return v;
+        return name;
+    }
+
+    // Remember a source for the dashboard's "used before" list: dedupe by name, newest first, capped.
+    private void RecordRecentLocked(string name, string title)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return;
+        name = name.Trim();
+        _settings.RecentSources.RemoveAll(r => NameEq(r.Name, name));
+        _settings.RecentSources.Insert(0, new RecentSource { Name = name, Title = string.IsNullOrWhiteSpace(title) ? name : title });
+        const int cap = 24;
+        if (_settings.RecentSources.Count > cap)
+            _settings.RecentSources.RemoveRange(cap, _settings.RecentSources.Count - cap);
+    }
+
     public int GameLibrarySize => _library.Count;
 
     public IReadOnlyList<(string process, string title)> LibraryGames()
@@ -162,6 +183,7 @@ public sealed class DetectionEngine : IDisposable
             name = name.Trim();
             if (!_settings.Sources.Any(x => NameEq(x.ProcessName, name)))
                 _settings.Sources.Add(new GameSource { ProcessName = name, Pid = null });
+            RecordRecentLocked(name, TitleFor(name));
             RestartCaptureLocked();
         }
     }
@@ -261,6 +283,7 @@ public sealed class DetectionEngine : IDisposable
             else
             {
                 _autoSources.Add(new GameSource { ProcessName = d.name, Pid = d.pid, Auto = true });
+                RecordRecentLocked(d.name, d.title);
                 Log?.Invoke($"auto-detected source: {d.title} ({d.name}, pid {d.pid})");
             }
         }

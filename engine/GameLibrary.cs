@@ -18,6 +18,9 @@ public sealed class GameLibrary
     public IReadOnlyList<Entry> All() =>
         _byName.Select(kv => new Entry(kv.Key, kv.Value)).OrderBy(e => e.Title, StringComparer.OrdinalIgnoreCase).ToList();
 
+    /// <summary>The friendly title for a known game's process name, if any.</summary>
+    public bool TryGetTitle(string process, out string title) => _byName.TryGetValue(process ?? "", out title);
+
     public static GameLibrary Load(string path)
     {
         var lib = new GameLibrary();

@@ -94,13 +94,12 @@ public sealed class MainWindow : Form
         switch (cmd)
         {
             case "snapshot": return Snapshot();
-            case "sources": return SourcesInfo();
             case "setEnabled": _engine.SetEnabled(args.GetProperty("on").GetBoolean()); Persist(); return Snapshot();
             case "setAutoDetect": _engine.SetAutoDetect(args.GetProperty("on").GetBoolean()); Persist(); return Snapshot();
             case "setVoiceChat": _engine.SetVoiceChat(args.GetProperty("on").GetBoolean()); Persist(); return Snapshot();
             case "saveSettings": return SaveSettings(args);
-            case "addSource": AddSourceCmd(args); Persist(); return SourcesInfo();
-            case "removeSource": _engine.RemoveSource(args.GetProperty("name").GetString()); Persist(); return SourcesInfo();
+            case "addSource": AddSourceCmd(args); Persist(); return Snapshot();
+            case "removeSource": _engine.RemoveSource(args.GetProperty("name").GetString()); Persist(); return Snapshot();
             case "apps": return AppsInfo();
             case "setDefaultAction": _engine.SetDefaultAction(args.GetProperty("action").GetString()); return AppsInfo();
             case "setDuckVolume": _engine.SetDuckVolume((float)args.GetProperty("value").GetDouble()); return AppsInfo();
@@ -125,26 +124,31 @@ public sealed class MainWindow : Form
             _engine.AddSourceByName(name);
     }
 
-    // Apps you can add as a source right now: anything currently producing audio, plus running
-    // known games and voice apps (so they appear even when silent). The full game library is NOT
-    // listed — only what's actually running. Excludes already-monitored sources and Voxinator.
-    private object SourcesInfo()
+    // The dashboard's two source lists:
+    //   running = currently-running candidates to monitor (known games/voice first so they sort to
+    //             the top, then other audio apps), excluding already-monitored sources + Voxinator.
+    //   recent  = previously-monitored sources that aren't running or monitored right now.
+    private (List<object> running, List<object> recent) SourceLists()
     {
         var monitored = new HashSet<string>(_engine.SourceStates().Select(x => x.name), StringComparer.OrdinalIgnoreCase);
-        var candidates = new List<(string name, string title)>();
-        foreach (var a in ProcessList.AudioSessions()) candidates.Add((a.ProcessName, a.ProcessName));
-        foreach (var k in _engine.RunningKnownApps()) candidates.Add((k.name, k.title));
-
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var running = candidates
-            .Where(c => !string.IsNullOrWhiteSpace(c.name)
-                        && !monitored.Contains(c.name)
-                        && !string.Equals(c.name, "voxinator", StringComparison.OrdinalIgnoreCase)
-                        && seen.Add(c.name))
-            .OrderBy(c => c.title, StringComparer.OrdinalIgnoreCase)
-            .Select(c => new { name = c.name, title = c.title })
+        var running = new List<object>();
+        var runningNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(string name, string title)
+        {
+            if (string.IsNullOrWhiteSpace(name) || monitored.Contains(name)
+                || string.Equals(name, "voxinator", StringComparison.OrdinalIgnoreCase) || !seen.Add(name)) return;
+            running.Add(new { name, title = string.IsNullOrWhiteSpace(title) ? name : title });
+            runningNames.Add(name);
+        }
+        foreach (var k in _engine.RunningKnownApps()) Add(k.name, k.title);     // games/voice first
+        foreach (var a in ProcessList.AudioSessions()) Add(a.ProcessName, a.ProcessName);
+
+        var recent = (_engine.Settings.RecentSources ?? new List<RecentSource>())
+            .Where(r => !string.IsNullOrWhiteSpace(r.Name) && !monitored.Contains(r.Name) && !runningNames.Contains(r.Name))
+            .Select(r => (object)new { name = r.Name, title = string.IsNullOrWhiteSpace(r.Title) ? r.Name : r.Title })
             .ToList();
-        return new { running };
+        return (running, recent);
     }
 
     private object AppsInfo()
@@ -209,6 +213,7 @@ public sealed class MainWindow : Form
         var sources = _engine.SourceStates()
             .Select(x => new { name = x.name, capturing = x.capturing, active = x.active, auto = _engine.IsAutoSource(x.name) })
             .ToList();
+        var (running, recent) = SourceLists();
         return new
         {
             enabled = s.Enabled,
@@ -221,6 +226,8 @@ public sealed class MainWindow : Form
             updateVersion = _updater?.StagedVersion ?? "",
             launchOnStartup = AutoStart.IsEnabled(),
             sources,
+            running,
+            recent,
             defaultAction = s.DefaultAction,
             duckVolume = s.DuckVolume,
             rampMs = s.RampMs,

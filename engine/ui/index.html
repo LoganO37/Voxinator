@@ -69,8 +69,34 @@
 
         <div class="card">
           <div class="card-title">Monitored now</div>
-          <div class="row-sub" style="margin-bottom:12px">Sources being listened to for dialog — games and voice chat. Add more in Settings.</div>
+          <div class="row-sub" style="margin-bottom:12px">Sources being listened to for dialog — games and voice chat.</div>
           <div id="sourcesList" class="sources"><div class="empty">Nothing monitored yet.</div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Sources</div>
+          <div class="toggle-row">
+            <div>
+              <div class="row-title">Auto-detect games</div>
+              <div class="row-sub">Automatically monitor known games (256 in the library) while they're running.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="sAuto" /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <div>
+              <div class="row-title">Duck for voice chat</div>
+              <div class="row-sub">Monitor Discord and other call apps, so your media ducks when someone's talking.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="sVoice" /><span class="slider"></span></label>
+          </div>
+          <div class="addrow" style="margin-top:14px">
+            <input type="text" id="sAddName" placeholder="Add by name, e.g. eldenring (no .exe)" />
+            <button class="btn primary" id="sAddBtn">Add</button>
+          </div>
+          <div class="sub-label">Playing now — click to monitor</div>
+          <div id="sRunning" class="chips"><div class="empty">Nothing running to add right now.</div></div>
+          <div class="sub-label">Used before — click to monitor again</div>
+          <div id="sRecent" class="chips"><div class="empty">Sources you've monitored will show up here.</div></div>
         </div>
       </section>
 
@@ -97,30 +123,6 @@
               <button class="btn mini primary" id="btnRestart">Restart now</button>
             </span>
           </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">Sources</div>
-          <div class="toggle-row">
-            <div>
-              <div class="row-title">Auto-detect games</div>
-              <div class="row-sub">Automatically monitor known games (256 in the library) while they're running.</div>
-            </div>
-            <label class="switch"><input type="checkbox" id="sAuto" /><span class="slider"></span></label>
-          </div>
-          <div class="toggle-row">
-            <div>
-              <div class="row-title">Duck for voice chat</div>
-              <div class="row-sub">Monitor Discord and other call apps, so your media ducks when someone's talking.</div>
-            </div>
-            <label class="switch"><input type="checkbox" id="sVoice" /><span class="slider"></span></label>
-          </div>
-          <div class="addrow" style="margin-top:14px">
-            <input type="text" id="sAddName" placeholder="Add by name, e.g. eldenring (no .exe)" />
-            <button class="btn primary" id="sAddBtn">Add</button>
-          </div>
-          <div class="sub-label">Currently running — click to monitor</div>
-          <div id="sRunning" class="chips"><div class="empty">Nothing running to add right now.</div></div>
         </div>
 
         <div class="card">

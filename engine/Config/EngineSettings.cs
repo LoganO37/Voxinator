@@ -11,6 +11,14 @@ public sealed class GameSource
     [JsonIgnore] public bool Auto { get; set; } // engine-detected source; transient, not persisted
 }
 
+/// <summary>A source the user has monitored before (manual or auto-detected), remembered so the
+/// dashboard can offer it for quick re-adding even when it isn't currently running.</summary>
+public sealed class RecentSource
+{
+    public string Name { get; set; }
+    public string Title { get; set; }
+}
+
 /// <summary>Per-app override of the global action, keyed by process name. Action is "duck" (lower
 /// the volume, then fade back), "pause" (stop playback via the app's media controls), or "ignore"
 /// (never touch this app — e.g. voice chat).</summary>
@@ -39,6 +47,10 @@ public sealed class EngineSettings
     /// <summary>Processes monitored for speech. Speech in ANY of them ducks media
     /// (e.g. a game's dialog AND a Discord call).</summary>
     public List<GameSource> Sources { get; set; } = new();
+
+    /// <summary>Sources monitored at some point (most-recent first), for the dashboard's
+    /// "used before" quick-add list. Capped; titles cached for display.</summary>
+    public List<RecentSource> RecentSources { get; set; } = new();
 
     // ---- Ducking behavior (how other apps react to detected dialog) ----
     /// <summary>Global action for any audio app without its own rule: "duck" or "pause". The
@@ -80,6 +92,7 @@ public sealed class EngineSettings
     {
         Sources ??= new();
         Apps ??= new();
+        RecentSources ??= new();
         if (Sources.Count == 0 && !string.IsNullOrEmpty(GameProcessName))
             Sources.Add(new GameSource { ProcessName = GameProcessName, Pid = GamePid });
         GamePid = null;
@@ -97,6 +110,7 @@ public sealed class EngineSettings
         var c = (EngineSettings)MemberwiseClone();
         c.Sources = Sources.Select(x => new GameSource { ProcessName = x.ProcessName, Pid = x.Pid }).ToList();
         c.Apps = Apps.Select(x => new AppRule { Name = x.Name, Action = x.Action }).ToList();
+        c.RecentSources = RecentSources.Select(x => new RecentSource { Name = x.Name, Title = x.Title }).ToList();
         return c;
     }
 }
