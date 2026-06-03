@@ -6,7 +6,7 @@ namespace Ducker.Tray;
 /// Ensures only one Voxinator runs at a time. The first instance owns a named mutex and listens
 /// on a named event; a second launch (e.g. the desktop shortcut while the app is hidden in the
 /// tray) detects the mutex, signals the event so the running instance re-opens its window, then
-/// exits. Without this, the second process would collide with the first on the WebSocket port.
+/// exits. Without this, two instances would both monitor audio and fight over the mixer.
 /// Names are session-local, which matches the typical "double-launch in one session" case.
 /// </summary>
 public sealed class SingleInstance : IDisposable

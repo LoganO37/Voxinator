@@ -21,10 +21,7 @@
       </div>
       <nav class="nav">
         <button class="nav-item active" data-view="dashboard"><span class="nav-ico">🎛️</span> Dashboard</button>
-        <button class="nav-item" data-view="games"><span class="nav-ico">🎮</span> Games</button>
-        <button class="nav-item" data-view="websites"><span class="nav-ico">🌐</span> Websites</button>
         <button class="nav-item" data-view="settings"><span class="nav-ico">⚙️</span> Settings</button>
-        <button class="nav-item" data-view="extension"><span class="nav-ico">🧩</span> Get Extension</button>
       </nav>
       <div class="sidebar-foot">
         <div class="state-dot" id="footDot"></div>
@@ -37,7 +34,7 @@
       <section class="view active" id="view-dashboard">
         <header class="view-head">
           <h1>Dashboard</h1>
-          <p class="sub">Voxinator lowers your music and pauses videos when your game or call has dialog.</p>
+          <p class="sub">Voxinator lowers or pauses your other apps when your game or voice chat has dialog.</p>
         </header>
 
         <div class="status-banner" id="statusBanner">
@@ -46,7 +43,6 @@
             <div class="status-title" id="statusTitle">Idle</div>
             <div class="status-sub" id="statusSub">Waiting…</div>
           </div>
-          <div class="ext-chip" id="extChip">Extension: —</div>
         </div>
 
         <div class="card toggle-row">
@@ -57,17 +53,50 @@
           <label class="switch"><input type="checkbox" id="tglEnabled" /><span class="slider"></span></label>
         </div>
 
-        <div class="card toggle-row">
-          <div>
-            <div class="row-title">Auto-detect games</div>
-            <div class="row-sub">Automatically monitor known games (256 in the library) while they're running.</div>
+        <div class="card">
+          <div class="card-title">Ducking</div>
+          <div class="row-sub" style="margin-bottom:14px">What other apps do when dialog is detected. Fine-tune per app in Settings.</div>
+          <div class="seg" id="dDefault">
+            <button class="seg-btn" data-action="duck">🔉&nbsp; Duck</button>
+            <button class="seg-btn" data-action="pause">⏸&nbsp; Pause</button>
           </div>
-          <label class="switch"><input type="checkbox" id="tglAuto" /><span class="slider"></span></label>
+          <div class="field" style="margin-top:16px">
+            <label>Duck to <span class="val" id="vDDuck"></span></label>
+            <input type="range" id="dDuck" min="0" max="100" step="5" />
+            <div class="hint">Target volume while ducking. Lower is quieter.</div>
+          </div>
         </div>
 
         <div class="card">
           <div class="card-title">Monitored now</div>
+          <div class="row-sub" style="margin-bottom:12px">Sources being listened to for dialog — games and voice chat.</div>
           <div id="sourcesList" class="sources"><div class="empty">Nothing monitored yet.</div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Sources</div>
+          <div class="toggle-row">
+            <div>
+              <div class="row-title">Auto-detect games</div>
+              <div class="row-sub">Automatically monitor known games (256 in the library) while they're running.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="sAuto" /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <div>
+              <div class="row-title">Duck for voice chat</div>
+              <div class="row-sub">Monitor Discord and other call apps, so your media ducks when someone's talking.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="sVoice" /><span class="slider"></span></label>
+          </div>
+          <div class="addrow" style="margin-top:14px">
+            <input type="text" id="sAddName" placeholder="Add by name, e.g. eldenring (no .exe)" />
+            <button class="btn primary" id="sAddBtn">Add</button>
+          </div>
+          <div class="sub-label">Playing now — click to monitor</div>
+          <div id="sRunning" class="chips"><div class="empty">Nothing running to add right now.</div></div>
+          <div class="sub-label">Used before — click to monitor again</div>
+          <div id="sRecent" class="chips"><div class="empty">Sources you've monitored will show up here.</div></div>
         </div>
       </section>
 
@@ -75,7 +104,7 @@
       <section class="view" id="view-settings">
         <header class="view-head">
           <h1>Settings</h1>
-          <p class="sub">Detection tuning and the local connection the browser extension uses.</p>
+          <p class="sub">Sources, detection tuning, and per-app behavior.</p>
         </header>
 
         <div class="card">
@@ -113,148 +142,28 @@
             <input type="range" id="setEnd" min="0" max="5000" step="50" />
             <div class="hint">Keeps media ducked through natural pauses between lines.</div>
           </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">Connection</div>
-          <div class="grid2">
-            <div class="field"><label>WebSocket port</label><input type="number" id="setPort" min="1" max="65535" /></div>
-            <div class="field"><label>Token</label><input type="text" id="setToken" /></div>
+          <div class="actions">
+            <button class="btn primary" id="btnSaveSettings">Save detection settings</button>
+            <span class="saved" id="savedMsg">Saved</span>
           </div>
-          <div class="hint">The browser extension connects to <code>ws://127.0.0.1:&lt;port&gt;</code> using this token.</div>
-        </div>
-
-        <div class="actions">
-          <button class="btn primary" id="btnSaveSettings">Save settings</button>
-          <span class="saved" id="savedMsg">Saved</span>
-        </div>
-      </section>
-
-      <!-- PLACEHOLDERS (next slices) -->
-      <section class="view" id="view-games">
-        <header class="view-head">
-          <h1>Games</h1>
-          <p class="sub">Voxinator auto-detects known games while they run — and you can add any app yourself.</p>
-        </header>
-
-        <div class="card toggle-row">
-          <div>
-            <div class="row-title">Auto-detect games</div>
-            <div class="row-sub">Automatically monitor games from the built-in library while they're running.</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="gAuto" /><span class="slider"></span></label>
         </div>
 
         <div class="card">
-          <div class="card-title">Monitored sources</div>
-          <div id="gMonitored" class="sources"><div class="empty">Nothing monitored yet.</div></div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">Add a source</div>
-          <div class="addrow">
-            <input type="text" id="gAddName" placeholder="Executable name, e.g. eldenring (no .exe)" />
-            <button class="btn primary" id="gAddBtn">Add</button>
-          </div>
-          <div class="sub-label">Currently playing apps — click to monitor</div>
-          <div id="gApps" class="chips"><div class="empty">No apps playing audio right now.</div></div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">Game library <span class="count" id="gLibCount"></span></div>
-          <input type="text" id="gSearch" class="search" placeholder="Search the library…" />
-          <div id="gLibList" class="liblist"></div>
-        </div>
-      </section>
-
-      <section class="view" id="view-websites">
-        <header class="view-head">
-          <h1>Websites</h1>
-          <p class="sub">How browser media reacts to dialog. Changes apply instantly through the extension.</p>
-        </header>
-
-        <div class="card">
-          <div class="card-title">Default behavior</div>
-          <div class="row-sub" style="margin-bottom:14px">Used for any site without its own rule below.</div>
-          <div class="seg" id="wDefault">
-            <button class="seg-btn" data-action="pause">⏸&nbsp; Pause</button>
-            <button class="seg-btn" data-action="duck">🔉&nbsp; Duck</button>
-          </div>
-          <div class="hint" style="margin-top:10px"><b>Pause</b> = hard stop (best for videos &amp; audiobooks).
-            <b>Duck</b> = lower the volume, then restore it (best for music).</div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">Duck level &amp; fade</div>
-          <div class="field">
-            <label>Duck to <span class="val" id="vDuck"></span></label>
-            <input type="range" id="wDuck" min="0" max="100" step="5" />
-            <div class="hint">Target volume while ducking. Lower is quieter.</div>
-          </div>
+          <div class="card-title">Ducking behavior</div>
           <div class="field">
             <label>Fade back in <span class="val" id="vRamp"></span></label>
-            <input type="range" id="wRamp" min="0" max="2000" step="50" />
+            <input type="range" id="sRamp" min="0" max="2000" step="50" />
             <div class="hint">The volume cut is instant; this sets how gradually it fades back in once dialog ends. 0 = instant.</div>
           </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">Site rules</div>
+          <div class="sub-label" style="margin-top:6px">Per-app rules</div>
+          <div class="row-sub" style="margin-bottom:12px">Override the default for a specific app, or set one to <b>Ignore</b> so it's never touched (e.g. voice chat).</div>
           <div class="addrow">
-            <input type="text" id="wAddHost" placeholder="Add a site, e.g. soundcloud.com" />
-            <button class="btn primary" id="wAddBtn">Add</button>
+            <input type="text" id="ruleAddName" placeholder="App name, e.g. spotify (no .exe)" />
+            <button class="btn primary" id="ruleAddBtn">Add</button>
           </div>
-          <div id="wSites" class="sitelist"></div>
-        </div>
-
-        <div class="card toggle-row">
-          <div>
-            <div class="row-title">Browser extension</div>
-            <div class="row-sub">Required for Voxinator to control YouTube, Amazon Music, and other sites.</div>
-          </div>
-          <span class="ext-chip" id="wExtChip">—</span>
-        </div>
-      </section>
-
-      <section class="view" id="view-extension">
-        <header class="view-head">
-          <h1>Get the extension</h1>
-          <p class="sub">Voxinator controls your browser through a small add-on. Install it once — about two minutes.</p>
-        </header>
-
-        <div class="card update" id="extUpdateCard" style="display:none"></div>
-
-        <div class="card">
-          <div class="card-title">1 · Choose your browser</div>
-          <div class="seg" id="extBrowser">
-            <button class="seg-btn active" data-b="chrome">Chrome / Edge</button>
-            <button class="seg-btn" data-b="firefox">Firefox</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">2 · Get the files</div>
-          <div class="row-sub" style="margin-bottom:13px">We'll copy the extension to a folder and open it for you.</div>
-          <div class="actions">
-            <button class="btn primary" id="extGet">📂 Get extension &amp; open folder</button>
-            <button class="btn" id="extZip">Save as .zip</button>
-          </div>
-          <div class="hint" id="extPath" style="margin-top:11px"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">3 · Install it</div>
-          <div class="urlbar">
-            <span class="urllabel">Open this in your browser:</span>
-            <code id="extUrl"></code>
-            <button class="btn mini" id="extCopyUrl">Copy</button>
-          </div>
-          <ol class="steps" id="extSteps"></ol>
-        </div>
-
-        <div class="card">
-          <div class="card-title">FAQ &amp; common mistakes</div>
-          <div id="extFaq" class="faq"></div>
+          <div class="sub-label">Currently playing — click to add a rule</div>
+          <div id="rulePlaying" class="chips"><div class="empty">No other apps playing audio right now.</div></div>
+          <div id="ruleList" class="sitelist"></div>
         </div>
       </section>
     </main>

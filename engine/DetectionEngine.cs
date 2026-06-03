@@ -1,9 +1,8 @@
 using System.Diagnostics;
-using System.Text.Json;
+using Ducker.Audio;
 using Ducker.Capture;
 using Ducker.Config;
 using Ducker.Interop;
-using Ducker.Ipc;
 using Ducker.Vad;
 
 namespace Ducker;
@@ -42,15 +41,12 @@ public sealed class DetectionEngine : IDisposable
     private readonly object _lock = new();
     private readonly List<SourceMonitor> _monitors = new();
     private readonly System.Threading.Timer _watchdog;
-    private DialogWebSocketServer _ws;
-    private int _wsPort;
-    private string _wsToken;
     private EngineSettings _settings;
     private readonly GameLibrary _library;
     private readonly List<GameSource> _autoSources = new(); // engine-detected games (transient)
+    private readonly MediaController _media = new();        // ducks/pauses other apps natively
 
     public bool Ducking { get; private set; }
-    public int ExtensionClients => _ws?.ClientCount ?? 0; // browser extensions connected to the WS
     public event Action<bool> DuckChanged;
     public event Action StateChanged;
     public Action<string> Log { get; set; }
@@ -60,7 +56,7 @@ public sealed class DetectionEngine : IDisposable
         _modelPath = modelPath;
         _settings = settings;
         _library = GameLibrary.Load(Path.Combine(AppContext.BaseDirectory, "games.json"));
-        StartWs(settings.Port, settings.Token);
+        _media.Log = m => Log?.Invoke(m);
         _watchdog = new System.Threading.Timer(_ => Watchdog(), null, 5000, 5000);
     }
 
@@ -108,9 +104,7 @@ public sealed class DetectionEngine : IDisposable
     {
         lock (_lock)
         {
-            bool wsChanged = s.Port != _wsPort || s.Token != _wsToken;
             _settings = s;
-            if (wsChanged) { _ws?.Dispose(); StartWs(s.Port, s.Token); }
             // Apply threshold (read live) + timing in place — do NOT tear down captures.
             foreach (var m in _monitors) m.Debouncer?.Configure(s.MinSpeechMs, s.EndBufferMs);
             RestartCaptureLocked(); // incremental: only reacts to source changes; captures preserved
@@ -122,18 +116,25 @@ public sealed class DetectionEngine : IDisposable
         lock (_lock)
         {
             name ??= "";
+            _settings.ExcludedSources.RemoveAll(x => NameEq(x, name)); // re-adding clears any exclusion
             var existing = _settings.Sources.FirstOrDefault(x => NameEq(x.ProcessName, name));
             if (existing != null) existing.Pid = pid;
             else _settings.Sources.Add(new GameSource { ProcessName = name, Pid = pid });
+            RecordRecentLocked(name, TitleFor(name));
             RestartCaptureLocked();
         }
     }
 
     public void RemoveSource(string name)
     {
+        if (string.IsNullOrWhiteSpace(name)) return;
         lock (_lock)
         {
+            name = name.Trim();
             _settings.Sources.RemoveAll(x => NameEq(x.ProcessName, name));
+            _autoSources.RemoveAll(a => NameEq(a.ProcessName, name));
+            // Exclude so auto-detect (games or voice chat) won't re-add it on the next tick.
+            if (!_settings.ExcludedSources.Any(x => NameEq(x, name))) _settings.ExcludedSources.Add(name);
             RestartCaptureLocked();
         }
     }
@@ -143,6 +144,37 @@ public sealed class DetectionEngine : IDisposable
     public void SetEnabled(bool enabled) { lock (_lock) { _settings.Enabled = enabled; RestartCaptureLocked(); } }
 
     public void SetAutoDetect(bool on) { lock (_lock) { _settings.AutoDetectGames = on; RefreshAutoSourcesLocked(); RestartCaptureLocked(); } }
+
+    public void SetVoiceChat(bool on) { lock (_lock) { _settings.DuckForVoiceChat = on; RefreshAutoSourcesLocked(); RestartCaptureLocked(); } }
+
+    /// <summary>Running known apps (library games + voice apps) — surfaced in the UI as quick-add
+    /// sources so they appear even when silent (the "currently running" list).</summary>
+    public IReadOnlyList<(string name, string title)> RunningKnownApps()
+    {
+        var list = _library.FindRunningGames().Select(g => (g.name, g.title)).ToList();
+        list.AddRange(VoiceApps.FindRunning().Select(v => (v.name, v.title)));
+        return list;
+    }
+
+    // Friendly title for a process name (known game or voice app), else the name itself.
+    private string TitleFor(string name)
+    {
+        if (_library.TryGetTitle(name, out var t)) return t;
+        if (VoiceApps.Known.TryGetValue(name, out var v)) return v;
+        return name;
+    }
+
+    // Remember a source for the dashboard's "used before" list: dedupe by name, newest first, capped.
+    private void RecordRecentLocked(string name, string title)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return;
+        name = name.Trim();
+        _settings.RecentSources.RemoveAll(r => NameEq(r.Name, name));
+        _settings.RecentSources.Insert(0, new RecentSource { Name = name, Title = string.IsNullOrWhiteSpace(title) ? name : title });
+        const int cap = 24;
+        if (_settings.RecentSources.Count > cap)
+            _settings.RecentSources.RemoveRange(cap, _settings.RecentSources.Count - cap);
+    }
 
     public int GameLibrarySize => _library.Count;
 
@@ -155,8 +187,10 @@ public sealed class DetectionEngine : IDisposable
         lock (_lock)
         {
             name = name.Trim();
+            _settings.ExcludedSources.RemoveAll(x => NameEq(x, name)); // re-adding clears any exclusion
             if (!_settings.Sources.Any(x => NameEq(x.ProcessName, name)))
                 _settings.Sources.Add(new GameSource { ProcessName = name, Pid = null });
+            RecordRecentLocked(name, TitleFor(name));
             RestartCaptureLocked();
         }
     }
@@ -171,87 +205,56 @@ public sealed class DetectionEngine : IDisposable
         lock (_lock) return _autoSources.Any(a => NameEq(a.ProcessName, name));
     }
 
-    private void StartWs(int port, string token)
-    {
-        _ws = new DialogWebSocketServer(port, token);
-        _ws.Start();
-        _wsPort = port;
-        _wsToken = token;
-        try { _ws.SetConfig(BuildConfigJson()); } catch { } // seed the new server with current behavior config
-        Log?.Invoke($"WebSocket listening on ws://127.0.0.1:{port}/");
-    }
-
-    // ---- browser behavior config (pushed to the extension) ----
-
-    // Serialize the current site rules + duck/ramp/default-action into the CONFIG message the
-    // extension consumes. Safe to call single-threaded (ctor) or under _lock.
-    private string BuildConfigJson()
-    {
-        var s = _settings;
-        var sites = (s.Sites ?? new List<SiteRule>())
-            .Where(r => !string.IsNullOrWhiteSpace(r.Host))
-            .Select(r => new { host = r.Host.Trim().ToLowerInvariant(), action = NormAction(r.Action) });
-        return JsonSerializer.Serialize(new
-        {
-            type = "CONFIG",
-            defaultAction = NormAction(s.DefaultAction),
-            duckVolume = s.DuckVolume,
-            rampMs = s.RampMs,
-            sites,
-        });
-    }
-
-    public void BroadcastConfig()
-    {
-        string json;
-        lock (_lock) json = BuildConfigJson();
-        try { _ws?.SetConfig(json); } catch { }
-    }
+    // ---- ducking behavior (how other apps react to detected dialog) ----
 
     public void SetDefaultAction(string action)
     {
-        lock (_lock) _settings.DefaultAction = NormAction(action);
-        PersistAndPushConfig();
+        lock (_lock) _settings.DefaultAction = string.Equals(action, "pause", StringComparison.OrdinalIgnoreCase) ? "pause" : "duck";
+        PersistAndNotify();
     }
 
     public void SetDuckVolume(float v)
     {
         lock (_lock) _settings.DuckVolume = Math.Clamp(v, 0f, 1f);
-        PersistAndPushConfig();
+        PersistAndNotify();
     }
 
     public void SetRampMs(int ms)
     {
         lock (_lock) _settings.RampMs = Math.Clamp(ms, 0, 10000);
-        PersistAndPushConfig();
+        PersistAndNotify();
     }
 
-    public void SetSite(string host, string action)
+    // Per-app override: set a process's action ("duck" | "pause" | "ignore"), or update an existing one.
+    public void SetApp(string name, string action)
     {
-        if (string.IsNullOrWhiteSpace(host)) return;
+        if (string.IsNullOrWhiteSpace(name)) return;
         lock (_lock)
         {
-            host = host.Trim().ToLowerInvariant();
-            var r = _settings.Sites.FirstOrDefault(x => NameEq(x.Host, host));
+            name = name.Trim();
+            var r = _settings.Apps.FirstOrDefault(x => NameEq(x.Name, name));
             if (r != null) r.Action = NormAction(action);
-            else _settings.Sites.Add(new SiteRule { Host = host, Action = NormAction(action) });
+            else _settings.Apps.Add(new AppRule { Name = name, Action = NormAction(action) });
         }
-        PersistAndPushConfig();
+        PersistAndNotify();
     }
 
-    public void RemoveSite(string host)
+    public void RemoveApp(string name)
     {
-        lock (_lock) _settings.Sites.RemoveAll(x => NameEq(x.Host, host));
-        PersistAndPushConfig();
+        lock (_lock) _settings.Apps.RemoveAll(x => NameEq(x.Name, name));
+        PersistAndNotify();
     }
 
-    private static string NormAction(string a) =>
-        string.Equals(a, "duck", StringComparison.OrdinalIgnoreCase) ? "duck" : "pause";
+    private static string NormAction(string a)
+    {
+        if (string.Equals(a, "pause", StringComparison.OrdinalIgnoreCase)) return "pause";
+        if (string.Equals(a, "ignore", StringComparison.OrdinalIgnoreCase)) return "ignore";
+        return "duck";
+    }
 
-    private void PersistAndPushConfig()
+    private void PersistAndNotify()
     {
         try { _settings.Save(); } catch (Exception ex) { Log?.Invoke("save failed: " + ex.Message); }
-        BroadcastConfig();
         RaiseState();
     }
 
@@ -264,16 +267,20 @@ public sealed class DetectionEngine : IDisposable
             if (!_settings.Sources.Any(m => NameEq(m.ProcessName, a.ProcessName))) yield return a;
     }
 
-    // Auto-detect: add running known games (from games.json) as sources; drop ones that closed
-    // or that the user has since added manually. Called each watchdog tick.
+    // Auto-detect: add running known games (and, when enabled, voice apps) as sources; drop ones
+    // that closed or that the user has since added manually. Called each watchdog tick.
     private void RefreshAutoSourcesLocked()
     {
-        if (!_settings.Enabled || !_settings.AutoDetectGames)
+        if (!_settings.Enabled || (!_settings.AutoDetectGames && !_settings.DuckForVoiceChat))
         {
             if (_autoSources.Count > 0) _autoSources.Clear();
             return;
         }
-        var detected = _library.FindRunningGames();
+        var detected = new List<(uint pid, string name, string title)>();
+        if (_settings.AutoDetectGames) detected.AddRange(_library.FindRunningGames());
+        if (_settings.DuckForVoiceChat) detected.AddRange(VoiceApps.FindRunning());
+        if (_settings.ExcludedSources.Count > 0)
+            detected.RemoveAll(d => _settings.ExcludedSources.Any(x => NameEq(x, d.name))); // user stopped these
         _autoSources.RemoveAll(a =>
             !detected.Any(d => NameEq(d.name, a.ProcessName)) ||
             _settings.Sources.Any(m => NameEq(m.ProcessName, a.ProcessName)));
@@ -285,7 +292,8 @@ public sealed class DetectionEngine : IDisposable
             else
             {
                 _autoSources.Add(new GameSource { ProcessName = d.name, Pid = d.pid, Auto = true });
-                Log?.Invoke($"auto-detected game: {d.title} ({d.name}, pid {d.pid})");
+                RecordRecentLocked(d.name, d.title);
+                Log?.Invoke($"auto-detected source: {d.title} ({d.name}, pid {d.pid})");
             }
         }
     }
@@ -370,12 +378,25 @@ public sealed class DetectionEngine : IDisposable
     {
         if (Ducking == on) return;
         Ducking = on;
-        Log?.Invoke(on ? ">>> DUCK (broadcast DIALOG_START)" : "<<< UNDUCK (broadcast DIALOG_END)");
-        _ws?.Broadcast(on
-            ? $"{{\"type\":\"DIALOG_START\",\"ts\":{Now()}}}"
-            : $"{{\"type\":\"DIALOG_END\",\"ts\":{Now()}}}");
+        Log?.Invoke(on ? ">>> DUCK" : "<<< UNDUCK");
+        try { _media.SetActive(on, _settings, ExcludeNamesLocked()); }
+        catch (Exception ex) { Log?.Invoke("native duck/pause failed: " + ex.Message); }
         DuckChanged?.Invoke(on);
         RaiseState();
+    }
+
+    // Process names the controller must never touch: every monitored source (you never duck the
+    // thing you're detecting dialog on) and Voxinator itself. The user's per-app "ignore" rules are
+    // applied separately by MediaController from EngineSettings.Apps.
+    private HashSet<string> ExcludeNamesLocked()
+    {
+        var ex = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in EffectiveSourcesLocked())
+            if (!string.IsNullOrWhiteSpace(s.ProcessName)) ex.Add(s.ProcessName);
+        foreach (var m in _monitors)
+            if (!string.IsNullOrWhiteSpace(m.ProcessName)) ex.Add(m.ProcessName);
+        try { ex.Add(Process.GetCurrentProcess().ProcessName); } catch { }
+        return ex;
     }
 
     // Every tick: re-resolve PIDs, drop dead captures, and retry any source that isn't
@@ -411,17 +432,16 @@ public sealed class DetectionEngine : IDisposable
         catch { return null; }
     }
 
-    private static long Now() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     private void RaiseState() => StateChanged?.Invoke();
 
     public void Dispose()
     {
         try { _watchdog?.Dispose(); } catch { }
+        try { _media.Dispose(); } catch { }
         lock (_lock)
         {
             foreach (var m in _monitors) m.Dispose();
             _monitors.Clear();
-            _ws?.Dispose();
         }
     }
 }
